@@ -2,6 +2,15 @@
 
 ARGB fan controller + system sensor dashboard for a BC-250 running linux, with an ESP32-driven RGB controller for the case fans.
 
+## Install
+
+```bash
+git clone https://github.com/tmghd272/bc250-suite.git
+cd bc250-suite
+chmod +x install_bc250_panel_go.sh
+./install_bc250_panel_go.sh
+```
+
 ## Components
 
 | File | What it is |
