@@ -1,0 +1,2662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>BC-250 Control Suite</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" rel="stylesheet">
+<style>
+  @property --mx1{ syntax:'<percentage>'; inherits:true; initial-value:15%; }
+  @property --my1{ syntax:'<percentage>'; inherits:true; initial-value:5%; }
+  @property --mx2{ syntax:'<percentage>'; inherits:true; initial-value:88%; }
+  @property --my2{ syntax:'<percentage>'; inherits:true; initial-value:10%; }
+  @property --mx3{ syntax:'<percentage>'; inherits:true; initial-value:45%; }
+  @property --my3{ syntax:'<percentage>'; inherits:true; initial-value:95%; }
+
+  :root{
+    --bg-deep:#000000; --bg-mid:#111114; --bg-warm:#0a0a10;
+    --glass-bg:rgba(255,255,255,0.07); --glass-bg-hi:rgba(255,255,255,0.12);
+    --glass-border:rgba(255,255,255,0.14); --glass-highlight:rgba(255,255,255,0.35);
+    --text:#f5f5f7; --text-muted:rgba(235,235,245,0.55);
+    --accent:#5ec8ff; --accent-strong:#0a84ff; --danger:#ff453a; --warn:#ffb340;
+    --glow-color:#5ec8ff; /* dynamic - updated by JS to match live LED preview */
+    --phosphor:var(--accent); --phosphor-dim:var(--accent-strong); --chassis-lo:rgba(0,0,0,0.3);
+  }
+  *{box-sizing:border-box;}
+  html{
+    scrollbar-width: none; /* firefox: hidden, we draw our own overlay */
+    overflow-x:hidden; /* mobile WebKit often treats html, not body, as the real root scrolling context - overflow-x:hidden on body alone doesn't reliably stop horizontal rubber-banding/page-resize there if anything overflows */
+    background: var(--bg-deep); /* iOS Safari's overscroll rubber-band effect reveals whatever's behind body when it bounces - that area was showing through as a mismatched black/white bar since only body had a background set, not html */
+  }
+  body{
+    margin:0; min-height:100vh;
+    /* no background here on purpose - html already carries --bg-deep for the
+       iOS overscroll fix. If body has its own opaque background too, it paints
+       *after* body::before (negative z-index children paint before an element's
+       own in-flow background in stacking order) and blacks out the orb mesh
+       gradient underneath it. */
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+    color:var(--text);
+    position:relative;
+    overflow-x:hidden;
+    padding-bottom: env(safe-area-inset-bottom); /* keeps content clear of the home-indicator swipe area on notched iPhones, now that viewport-fit=cover lets the page draw underneath it */
+  }
+  ::-webkit-scrollbar{ width:0; height:0; } /* webkit: hidden, we draw our own overlay */
+
+  /* ---- iOS-style overlay scrollbar: floats over content, no track, fades
+     in on scroll and fades out ~1s after motion stops ---- */
+  #iosScrollbar{
+    position:fixed; top:0; right:2px; width:5px; border-radius:99px;
+    background: rgba(255,255,255,0.45);
+    box-shadow: 0 0 3px rgba(0,0,0,0.5);
+    opacity:0; pointer-events:none; z-index:9999;
+    transition: opacity 0.35s ease, background 0.2s ease;
+    will-change: transform, opacity;
+  }
+  #iosScrollbar.visible{ opacity:1; }
+  #iosScrollbar.dragging{ background: rgba(255,255,255,0.7); width:6px; transition: opacity 0.2s ease; }
+  @media (hover:hover){
+    #iosScrollbar{ pointer-events:auto; cursor:pointer; }
+  }
+  body::before{
+    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+    background:
+      radial-gradient(circle 500px at var(--mx1,20%) var(--my1,10%), rgba(94,200,255,0.16), transparent 60%),
+      radial-gradient(circle 550px at var(--mx2,85%) var(--my2,15%), rgba(191,90,242,0.13), transparent 60%),
+      radial-gradient(circle 500px at var(--mx3,50%) var(--my3,90%), rgba(255,69,58,0.10), transparent 60%),
+      linear-gradient(180deg, var(--bg-warm), var(--bg-deep) 45%);
+    animation: meshDrift 22s ease-in-out infinite;
+  }
+  @keyframes meshDrift{
+    0%   { --mx1:15%; --my1:5%;  --mx2:88%; --my2:10%; --mx3:45%; --my3:95%; }
+    33%  { --mx1:30%; --my1:20%; --mx2:70%; --my2:30%; --mx3:65%; --my3:80%; }
+    66%  { --mx1:10%; --my1:30%; --mx2:80%; --my2:5%;  --mx3:30%; --my3:100%; }
+    100% { --mx1:15%; --my1:5%;  --mx2:88%; --my2:10%; --mx3:45%; --my3:95%; }
+  }
+
+  .glass{
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.6), inset 0 1px 0 var(--glass-highlight), 0 0 46px -10px var(--glow-color);
+  }
+
+  .topnav{
+    position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between;
+    margin:14px; padding:12px 20px; border-radius:20px;
+    background: rgba(20,20,24,0.6);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 10px 30px -12px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+  .topnav-brand{ font-size:15px; font-weight:700; letter-spacing:-0.01em; color:var(--text); }
+  .topnav-tabs{ display:flex; gap:4px; position:relative; }
+  .topnav-btn{
+    position:relative; z-index:1;
+    font-size:13px; font-weight:600; letter-spacing:-0.01em;
+    padding:8px 18px; border-radius:14px; border:1px solid transparent; background:transparent; color:var(--text-muted); cursor:pointer;
+    transition: color 0.3s ease;
+  }
+  .topnav-btn.active{ color:var(--text); }
+
+  .page{ padding:28px; max-width:1000px; margin:0 auto; }
+  .page[hidden]{ display:none; }
+
+  .chassis-unit{
+    width:100%; max-width:600px; margin:0 auto;
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    -webkit-backdrop-filter: blur(30px) saturate(160%);
+    backdrop-filter: blur(30px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    border-radius: 26px; padding: 22px;
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,0.7), inset 0 1px 0 var(--glass-highlight), 0 0 60px -8px var(--glow-color);
+    position:relative;
+    transition: box-shadow 0.6s ease;
+  }
+  .screw{ display:none; }
+
+  .plate-label{ font-size:12px; font-weight:600; letter-spacing:-0.005em; color:var(--text-muted); text-transform:none; display:flex; justify-content:space-between; padding:0 2px; margin-bottom:10px; }
+  .plate-label .status{ color:var(--danger); }
+  .plate-label .status.on{ color: var(--accent); }
+
+  .screen{
+    background: rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border-radius:18px; padding:16px 18px;
+    box-shadow: inset 0 2px 12px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.06);
+    margin-bottom:16px;
+  }
+  .screen-header{ display:flex; justify-content:space-between; font-size:11px; font-weight:600; color:var(--text-muted); margin-bottom:10px; }
+  .led-strip{ display:flex; gap:8px; justify-content:center; padding:14px 0 6px; flex-wrap:wrap; }
+  .led-dot{ width:16px; height:16px; border-radius:50%; background:#1a1a1e; box-shadow: inset 0 0 3px rgba(0,0,0,0.8); transition: background 0.15s linear, box-shadow 0.15s linear; }
+  .readout{ font-size:11px; color: var(--accent); text-align:center; letter-spacing:0.01em; margin-top:4px; min-height:14px; }
+
+  .section-label{ font-size:12px; font-weight:700; letter-spacing:-0.01em; color:var(--text-muted); margin:18px 0 10px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08); }
+  .section-label:first-of-type{ border-top:none; margin-top:0; padding-top:0; }
+  #colorsSection .section-label, #pixelColorSection .section-label{ border-top:1px solid rgba(255,255,255,0.08); margin-top:18px; padding-top:14px; }
+
+  .tab-bar{ display:flex; gap:3px; background:rgba(0,0,0,0.3); border-radius:16px; padding:4px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.4); position:relative; }
+  .tab-btn{ position:relative; z-index:1; flex:1; font-size:12px; font-weight:600; letter-spacing:-0.005em; padding:9px; border-radius:12px; border:none; background:none; color:var(--text-muted); cursor:pointer; transition: color 0.3s ease; }
+  .tab-btn.active{ color:var(--text); }
+
+  /* Liquid glass sliding indicator - the actual "pill" that glides between
+     selected options, shared by topnav-tabs and every tab-bar instance. JS
+     positions it via transform+width to exactly match the active button. */
+  .slide-indicator{
+    position:absolute; top:4px; bottom:4px; left:0;
+    border-radius:12px; z-index:0;
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.25);
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    will-change: transform;
+  }
+  .topnav-tabs .slide-indicator{ top:0; bottom:0; border-radius:14px; }
+
+  #ledControlsWrap.disabled{ opacity:0.3; pointer-events:none; filter: grayscale(0.7) blur(0.3px); transition: opacity 0.2s ease; }
+
+  .controls{ display:grid; gap:12px; }
+  .row{ display:flex; align-items:center; gap:12px; }
+  .row label{ font-size:12px; font-weight:600; color:var(--text-muted); width:74px; flex-shrink:0; }
+
+  input[type=range]{ -webkit-appearance:none; flex:1; height:5px; border-radius:99px; outline:none;
+    background: linear-gradient(90deg, var(--accent-strong) var(--fill,50%), rgba(255,255,255,0.12) var(--fill,50%));
+    transition: background 0.15s ease; } /* was snapping the fill instantly on every update (initial load, +/- step buttons, external sync) - this is what read as "static, no slide animation". Short enough that active dragging (many rapid 'input' events per second) still feels 1:1 responsive, not laggy. */
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow: 0 2px 6px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.1); cursor:pointer; }
+
+  input[type=color]{ -webkit-appearance:none; width:42px; height:30px; border:none; border-radius:10px; background:none; cursor:pointer; box-shadow: inset 0 0 0 2px rgba(255,255,255,0.15), 0 2px 6px rgba(0,0,0,0.3); }
+  input[type=color]::-webkit-color-swatch-wrapper{ padding:0; } input[type=color]::-webkit-color-swatch{ border:none; border-radius:8px; }
+
+  .effect-row{ display:grid; gap:8px; }
+  .eff-category-label{ font-size:10.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-muted); margin-top:10px; opacity:0.7; }
+  .eff-category-label:first-child{ margin-top:0; }
+  .eff-category-row{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:2px; }
+  .eff-btn{
+    font-size:12px; font-weight:600; letter-spacing:-0.005em; padding:9px 14px; border-radius:14px;
+    border:1px solid var(--glass-border);
+    background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    color: var(--text-muted); cursor:pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
+    transition: all 0.15s ease;
+  }
+  .eff-btn.active{ color: #fff; border-color: rgba(94,200,255,0.4); background: linear-gradient(180deg, rgba(94,200,255,0.35), rgba(10,132,255,0.25)); box-shadow: 0 0 16px -2px rgba(94,200,255,0.5), inset 0 1px 0 rgba(255,255,255,0.3); }
+
+  .power-switch{ width:52px; height:30px; border-radius:16px; background:rgba(255,255,255,0.1); box-shadow: inset 0 2px 5px rgba(0,0,0,0.4); position:relative; cursor:pointer; flex-shrink:0; transition: background 0.2s ease; }
+  .power-switch::after{ content:""; position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow: 0 2px 5px rgba(0,0,0,0.3); transition: left 0.2s ease; }
+  .power-switch.on::after{ left:25px; } .power-switch.on{ background: linear-gradient(135deg, var(--accent), var(--accent-strong)); box-shadow: inset 0 2px 5px rgba(0,0,0,0.2), 0 0 16px -2px var(--accent); }
+
+  .connect-btn{
+    width:100%; margin-top:2px; font-size:14px; font-weight:600; letter-spacing:-0.01em; padding:13px;
+    border-radius:16px; border:1px solid var(--glass-border);
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    color: var(--text); cursor:pointer;
+    box-shadow: 0 4px 14px -4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+    transition: all 0.15s ease;
+  }
+  .connect-btn:active{ transform: scale(0.98); }
+  .connect-btn.connected{ color: var(--accent); border-color: rgba(94,200,255,0.35); box-shadow: 0 4px 14px -4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.2), 0 0 20px -6px var(--accent); }
+
+  .text-input{ flex:1; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text); padding:9px 12px; border-radius:12px; font-family:'JetBrains Mono',monospace; font-size:13px; }
+  .select-input{
+    flex:1; background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text);
+    padding:9px 12px; border-radius:12px; font-family:'JetBrains Mono', monospace; font-size:13px;
+    appearance:none; -webkit-appearance:none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%235ec8ff'/></svg>");
+    background-repeat:no-repeat; background-position:right 14px center; padding-right:32px;
+    cursor:pointer;
+  }
+  .select-input:disabled{ opacity:0.4; cursor:default; }
+  .select-input option{ background:#16161a; color:var(--text); }
+
+  /* palette editor */
+  .palette-preview{ height:26px; border-radius:13px; margin-bottom:10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1); }
+  .palette-stops{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .stop-wrap{ position:relative; }
+  .stop-remove{ position:absolute; top:-6px; right:-6px; width:14px; height:14px; border-radius:50%; background:var(--danger); color:#fff; font-size:9px; line-height:14px; text-align:center; cursor:pointer; border:none; padding:0; }
+  .add-stop-btn{ width:26px; height:26px; border-radius:4px; border:1px dashed var(--text-muted); background:none; color:var(--text-muted); cursor:pointer; font-size:14px; }
+
+  /* ---- Sensors dashboard: SAME visual language as RGB Control (Oswald +
+     JetBrains Mono, chassis/phosphor color tokens, dark screen panels) - just
+     laid out as a telemetry grid (icon-badge tiles, status pill, KPI strip)
+     instead of physical controls. One consistent app, not two. ---- */
+  #page-sensors{ font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; max-width:1100px; }
+
+  .kpi-strip{ display:flex; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+  @keyframes glowPulse{
+    0%, 100% { box-shadow: 0 10px 26px -14px rgba(0,0,0,0.5), inset 0 1px 0 var(--glass-highlight), 0 0 22px -14px var(--glow-color); }
+    50%      { box-shadow: 0 10px 26px -14px rgba(0,0,0,0.5), inset 0 1px 0 var(--glass-highlight), 0 0 40px -8px  var(--glow-color); }
+  }
+  @keyframes glowPulseCard{
+    0%, 100% { box-shadow: 0 20px 45px -20px rgba(0,0,0,0.6), inset 0 1px 0 var(--glass-highlight), 0 0 28px -16px var(--glow-color); }
+    50%      { box-shadow: 0 20px 45px -20px rgba(0,0,0,0.6), inset 0 1px 0 var(--glass-highlight), 0 0 50px -10px var(--glow-color); }
+  }
+
+  .kpi-pill{
+    flex:1; min-width:150px; border-radius:18px; padding:14px 18px; display:flex; align-items:center; gap:10px;
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    -webkit-backdrop-filter: blur(20px) saturate(160%); backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    animation: glowPulse 4.5s ease-in-out infinite;
+  }
+  .kpi-pill:nth-child(2){ animation-delay: -1.1s; }
+  .kpi-pill:nth-child(3){ animation-delay: -2.3s; }
+  .kpi-pill:nth-child(4){ animation-delay: -3.4s; }
+  .kpi-pill-label{ font-size:10.5px; font-weight:600; letter-spacing:0.02em; color:var(--text-muted); }
+  .kpi-pill-value{ font-size:16px; font-weight:700; color:var(--text); }
+
+  .module-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:16px; }
+
+  .telemetry-card{
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+    border: 1px solid var(--glass-border);
+    border-radius: 22px; overflow:hidden;
+    animation: glowPulseCard 5s ease-in-out infinite;
+  }
+  .telemetry-card:nth-child(2){ animation-delay: -1.4s; }
+  .telemetry-card:nth-child(3){ animation-delay: -2.7s; }
+  .telemetry-card:nth-child(4){ animation-delay: -3.6s; }
+  .telemetry-card:nth-child(5){ animation-delay: -0.8s; }
+  .telemetry-card:nth-child(6){ animation-delay: -4.2s; }
+  .telemetry-card-header{ display:flex; align-items:flex-start; justify-content:space-between; padding:16px 18px 14px; border-bottom:1px solid rgba(255,255,255,0.08); }
+  .telemetry-header-left{ display:flex; gap:12px; align-items:center; }
+  .telemetry-icon-badge{ width:36px; height:36px; border-radius:12px; background:linear-gradient(135deg, var(--accent), var(--accent-strong)); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow: 0 4px 10px -2px rgba(94,200,255,0.4); }
+  .telemetry-title{ font-size:14.5px; font-weight:700; letter-spacing:-0.01em; color:var(--text); margin-bottom:2px; }
+  .telemetry-subtitle{ font-size:10.5px; color:var(--text-muted); max-width:280px; line-height:1.4; }
+
+  .status-pill{ font-size:10.5px; font-weight:700; letter-spacing:0.03em; padding:5px 13px; border-radius:20px; white-space:nowrap; text-transform:uppercase; }
+  .status-pill.live{ background:rgba(94,200,255,0.16); color:var(--accent); }
+  .status-pill.off{ background:rgba(255,255,255,0.08); color:var(--text-muted); }
+  .status-pill.warn{ background:rgba(255,179,64,0.16); color:var(--warn); }
+  .status-pill.bad{ background:rgba(255,69,58,0.16); color:var(--danger); }
+
+  /* ---- Fan Control & Processes: same telemetry-card/chassis language as
+     Sensors, just with a couple of interactive rows dropped in. ---- */
+  #page-fan, #page-processes{ font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; max-width:1100px; }
+
+  .fan-hint{
+    border-radius:16px; padding:12px 16px; font-size:12px; line-height:1.5; margin-bottom:16px;
+    border:1px solid var(--glass-border);
+    transition: opacity 0.4s ease, max-height 0.4s ease, padding 0.4s ease, margin 0.4s ease;
+    max-height:100px; overflow:hidden;
+  }
+  .fan-hint.ok{ background:rgba(94,200,255,0.08); color:var(--accent); }
+  .fan-hint.bad{ background:rgba(255,69,58,0.08); color:#ffb0ab; }
+  .fan-hint a{ color:inherit; }
+  .fan-hint.fadeout{ opacity:0; max-height:0; padding-top:0; padding-bottom:0; margin-bottom:0; border-width:0; pointer-events:none; }
+
+  .proc-toolbar{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; }
+  .proc-count{ font-size:11px; color:var(--text-muted); }
+  .proc-list{ display:flex; flex-direction:column; gap:6px; }
+  .proc-row{
+    display:grid; grid-template-columns: 1fr 70px 84px 90px 70px; align-items:center; gap:10px;
+    padding:10px 14px; border-radius:14px;
+    background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+    border:1px solid var(--glass-border);
+    min-width:0; /* defensive backstop - without this the row itself won't shrink below its content, letting a long name push the whole row (and the page) wider than the viewport */
+  }
+  .proc-name-wrap{ min-width:0; } /* THE actual fix: grid items default to min-width:auto (won't shrink below content size), which silently defeated .proc-name's ellipsis truncation below - the name just grew the column instead of truncating, overlapping PID/CPU/RAM/Kill */
+  .proc-row-head{ font-size:10px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--text-muted); padding:0 14px; background:none; border:none; }
+  .proc-sort-btn{
+    background:none; border:none; padding:0; margin:0; text-align:left; cursor:pointer;
+    font: inherit; color:inherit; text-transform:inherit; letter-spacing:inherit;
+    display:flex; align-items:center; gap:3px;
+  }
+  .proc-sort-btn:hover{ color:var(--text); }
+  .proc-sort-btn.active{ color:var(--accent); }
+  .proc-sort-btn .arrow{ font-size:9px; opacity:0; transition:opacity 0.15s ease; }
+  .proc-sort-btn.active .arrow{ opacity:1; }
+  .proc-name{ font-size:12.5px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .proc-user{ font-size:10.5px; color:var(--text-muted); }
+  .proc-cell{ font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--text-muted); }
+  .kill-btn{
+    font-size:11px; font-weight:700; padding:6px 10px; border-radius:10px; cursor:pointer;
+    background: linear-gradient(180deg, rgba(255,69,58,0.25), rgba(255,69,58,0.1));
+    border:1px solid rgba(255,69,58,0.35); color:#ffb0ab;
+    transition: filter 0.15s ease;
+  }
+  .kill-btn:hover{ filter:brightness(1.2); }
+  .kill-btn:disabled{ opacity:0.4; cursor:default; filter:none; }
+
+  /* ---- Fan slider: fine-step buttons + numeric readout, matching the
+     add-stop-btn's small circular icon-button language elsewhere. ---- */
+  .fan-step-btn{
+    width:28px; height:28px; border-radius:50%; flex-shrink:0; cursor:pointer;
+    border:1px solid var(--glass-border);
+    background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
+    color:var(--text); font-size:15px; font-weight:700; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .fan-step-btn:hover{ filter:brightness(1.25); }
+  .fan-step-btn:disabled{ opacity:0.35; cursor:default; filter:none; }
+  .fan-num-input{
+    width:56px; text-align:center; flex-shrink:0;
+    background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text);
+    padding:6px 4px; border-radius:10px; font-family:'JetBrains Mono', monospace; font-size:13px;
+  }
+  .fan-num-input.dirty{ border-color:var(--warn); box-shadow: 0 0 0 1px rgba(255,179,64,0.3); }
+
+  /* ---- Fan curve editor ---- */
+  .curve-graph-wrap{ position:relative; border-radius:16px; overflow:hidden; background:rgba(0,0,0,0.35); box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
+    user-select:none; -webkit-user-select:none; -moz-user-select:none; }
+  .curve-graph-wrap svg{ display:block; width:100%; height:auto; touch-action:none; }
+  .curve-graph-wrap svg circle{ touch-action:none; }
+  .curve-hint{ font-size:11px; color:var(--text-muted); margin-top:8px; line-height:1.5; }
+  .curve-toolbar{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .fan-toolbar{ display:flex; justify-content:flex-end; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .curve-toolbar button{ font-size:12px; font-weight:600; padding:8px 14px; border-radius:12px; cursor:pointer; border:1px solid var(--glass-border); color:var(--text); background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03)); }
+  .curve-toolbar button:hover{ filter:brightness(1.2); }
+  .curve-toolbar button:disabled{ opacity:0.35; cursor:default; filter:none; }
+  .curve-toolbar button.primary{ background:linear-gradient(180deg, rgba(94,200,255,0.3), rgba(94,200,255,0.1)); border-color:rgba(94,200,255,0.35); color:var(--accent); }
+  .curve-toolbar button.danger{ background:linear-gradient(180deg, rgba(255,69,58,0.25), rgba(255,69,58,0.1)); border-color:rgba(255,69,58,0.35); color:#ffb0ab; }
+
+  /* ---- Terminal tab ---- */
+  #termWrap{ background:#0a0a0a; border-radius:16px; box-shadow: inset 0 2px 10px rgba(0,0,0,0.6); }
+  #termContainer{ height:520px; }
+  #termContainer .xterm{ padding:10px; height:100%; }
+  #termContainer .xterm-viewport{ overscroll-behavior:contain; }
+  #termContainer .xterm-viewport::-webkit-scrollbar{ width:6px; }
+  #termContainer .xterm-viewport::-webkit-scrollbar-track{ background:transparent; }
+  #termContainer .xterm-viewport::-webkit-scrollbar-thumb{
+    background: rgba(255,255,255,0.45);
+    border-radius:99px; box-shadow: 0 0 3px rgba(0,0,0,0.5);
+  }
+  #termContainer .xterm-viewport::-webkit-scrollbar-thumb:hover{
+    background: rgba(255,255,255,0.7);
+  }
+
+  .tile-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap:18px 22px; padding:18px; }
+  .tile{ }
+  .tile-label{ font-size:10.5px; font-weight:600; letter-spacing:0.01em; color:var(--text-muted); margin-bottom:6px; }
+  .tile-value{ font-size:24px; font-weight:700; color:var(--text); letter-spacing:-0.02em; line-height:1; }
+  .tile-value .unit{ font-size:11px; font-weight:500; color:var(--text-muted); margin-left:3px; }
+  .dash-sparkline{ width:100%; height:22px; margin:8px 0 2px; display:block; }
+
+  .telemetry-footer{ display:flex; justify-content:space-between; padding:14px 18px; background:rgba(0,0,0,0.15); font-size:11px; }
+  .telemetry-footer-item{ display:flex; flex-direction:column; gap:2px; }
+  .telemetry-footer-label{ font-size:9.5px; font-weight:600; letter-spacing:0.02em; color:var(--text-muted); }
+  .telemetry-footer-value{ color:var(--text); font-family:'JetBrains Mono',monospace; }
+  .telemetry-footer input{ background:rgba(0,0,0,0.3); border:1px solid var(--glass-border); color:var(--text); padding:6px 10px; border-radius:10px; font-family:'JetBrains Mono',monospace; font-size:11px; width:140px; }
+
+  .dash-empty{ padding:60px 20px; text-align:center; color:var(--text-muted); font-size:12px; line-height:1.8; }
+  .dash-empty b{ color:var(--accent); }
+  .dash-empty code{ background:rgba(0,0,0,0.3); padding:2px 7px; border-radius:6px; color:var(--accent); font-family:'JetBrains Mono',monospace; }
+
+  /* ---- Mobile ---- */
+  @media (max-width: 720px){
+    .topnav{ margin:8px; padding:10px 12px; flex-wrap:nowrap; gap:8px; }
+    .topnav-brand{ font-size:13px; flex-shrink:0; }
+    .topnav-tabs{
+      flex:1 1 auto; min-width:0; /* lets flexbox actually shrink this to whatever's left after the brand, instead of a hardcoded calc(100vw - Npx) guess that broke - overflowed right past the rounded glass edge - whenever the brand's real rendered width didn't match the guess */
+      overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+    }
+    .topnav-tabs::-webkit-scrollbar{ display:none; }
+    .topnav-btn{ font-size:12px; padding:7px 12px; white-space:nowrap; }
+
+    /* The shared sliding-glass-pill indicator depends on a JS-calculated
+       pixel position staying in sync with wherever the tab bar is
+       horizontally scrolled to - that's inherently fragile (timing,
+       WebKit quirks, the calculation running before scroll settles) and
+       was the actual "liquid glass" breakage on mobile. Simplest robust
+       fix: don't use a shared moving element here at all on small screens -
+       give the active button its own background directly instead, so
+       there's nothing that can ever fall out of sync with scroll position. */
+    #topnavTabs .slide-indicator{ display:none; }
+    .topnav-btn.active{
+      background: linear-gradient(180deg, var(--glass-bg-hi), var(--glass-bg));
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.25);
+    }
+
+    .page{ padding:14px; }
+
+    .row{ flex-wrap:wrap; row-gap:8px; }
+    .row label{ width:auto; margin-right:4px; }
+
+    .telemetry-card-header{ flex-wrap:wrap; gap:10px; }
+    .telemetry-card-header > div:last-child{ flex-wrap:wrap; }
+
+    .proc-row{ grid-template-columns: 1fr 44px 50px 56px 40px; gap:6px; padding:9px 10px; }
+    .proc-cell{ font-size:11px; }
+    .kill-btn{ padding:11px 6px; font-size:10px; } /* narrow column width is fixed by the grid, but height isn't - this is a destructive action, worth a genuinely comfortable tap target rather than the bare-minimum 5px padding it had */
+    .proc-row{ min-height:44px; align-items:center; }
+    #procSearch{ font-size:13px; }
+
+    #fanPercentRow{ flex-wrap:wrap; }
+    #fanPercentRow input[type=range]{ flex-basis:100%; order:1; }
+    .fan-step-btn{ width:38px; height:38px; font-size:17px; } /* 28px was a genuine finger-sized-target problem, not just tight - bumped for mobile specifically, desktop (mouse) keeps the smaller 28px */
+    .fan-num-input{ width:50px; }
+
+    .curve-toolbar button{ flex:1 1 auto; font-size:11px; padding:8px 10px; }
+
+    .fan-toolbar{ justify-content:stretch; }
+    .fan-toolbar button{ flex:1 1 auto; text-align:center; }
+
+    #termContainer{ height:min(60vh, 420px); }
+    #page-terminal .telemetry-card-header > div:first-child{ min-width:0; }
+
+    .kpi-strip{ gap:8px; }
+
+    /* .stop-remove was a 14x14px absolutely-positioned badge - essentially
+       untappable with a finger, and sitting right at the edge of the color
+       swatch it belongs to (easy to mis-tap into opening the native color
+       picker instead of removing the stop). add-stop-btn was 26x26, also
+       tight for a finger. Both bumped for mobile only - desktop (mouse)
+       keeps the smaller, more compact originals. */
+    .stop-remove{ width:24px; height:24px; font-size:13px; line-height:24px; top:-9px; right:-9px; }
+    .add-stop-btn{ width:36px; height:36px; font-size:18px; }
+  }
+</style>
+<script>
+const ICONS = {
+  temp: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path d="M14 4v10.5a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>',
+  power: '<svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M13 2 3 14h6l-1 8 10-12h-6l1-8Z"/></svg>',
+  fan: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="2.2" fill="white" stroke="none"/><path d="M12 12c1.5-3 1-6-2-7.5S4.5 6 6 9M12 12c3 1.5 6 1 7.5-2S18 4.5 15 6M12 12c-1.5 3-1 6 2 7.5S19.5 18 18 15M12 12c-3-1.5-6-1-7.5 2S6 19.5 9 18"/></svg>',
+  chip: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  clock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
+  usage: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M3 17V9M9 17V5M15 17v-7M21 17v-3"/></svg>',
+  memory: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="7" width="18" height="10" rx="1"/><path d="M7 7v10M11 7v10M15 7v10M19 7v10"/></svg>',
+  cu: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>',
+};
+function iconFor(unit) {
+  if (unit === '°C') return ICONS.temp;
+  if (unit === 'W') return ICONS.power;
+  if (unit === 'RPM') return ICONS.fan;
+  if (unit === 'MHz') return ICONS.clock;
+  if (unit === '%') return ICONS.usage;
+  if (unit === 'MB') return ICONS.memory;
+  return ICONS.chip;
+}
+</script>
+</head>
+<body>
+
+<div id="iosScrollbar"></div>
+
+<div class="topnav">
+  <span class="topnav-brand">BC-250 Control Suite</span>
+  <div class="topnav-tabs" id="topnavTabs">
+    <div class="slide-indicator"></div>
+    <button class="topnav-btn" data-page="rgb">RGB Control</button>
+    <button class="topnav-btn active" data-page="sensors">System Sensors</button>
+    <button class="topnav-btn" data-page="fan">Fan Control</button>
+    <button class="topnav-btn" data-page="processes">Processes</button>
+    <button class="topnav-btn" data-page="terminal">Terminal</button>
+  </div>
+</div>
+
+<div class="page" id="page-rgb" hidden>
+<div class="chassis-unit">
+  <div class="screw tl"></div><div class="screw tr"></div>
+  <div class="screw bl"></div><div class="screw br"></div>
+
+  <div class="plate-label">
+    <span>BC-250 &middot; ARGB CONTROL</span>
+    <span class="status" id="statusText">DISCONNECTED</span>
+  </div>
+
+  <div class="screen">
+    <div class="screen-header">
+      <span id="effectLabel">MODE: SOLID</span>
+      <span>CH 1–<span id="ledCountLabel">16</span></span>
+    </div>
+    <div class="led-strip" id="ledStrip"></div>
+    <div class="readout" id="readout">awaiting connection…</div>
+  </div>
+
+  <div class="controls" id="tab-control">
+    <div class="row">
+      <label>Power</label>
+      <div class="power-switch on" id="powerSwitch"></div>
+    </div>
+
+    <div class="section-label">System Mode</div>
+    <div class="tab-bar" id="sysModeTabBar" style="margin-bottom:6px;">
+      <div class="slide-indicator"></div>
+      <button class="tab-btn active" id="modeSysNative" data-sysmode="NATIVE">Native (Web Panel)</button>
+      <button class="tab-btn" id="modeSysE131" data-sysmode="E131">E1.31 (External)</button>
+    </div>
+    <div class="readout" id="sysModeReadout" style="margin-bottom:14px;">This panel is driving the LEDs. Switch to E1.31 to hand control to OpenRGB or another external sender.</div>
+
+    <div id="ledControlsWrap">
+      <div class="section-label">Effect</div>
+      <div class="effect-row" id="effectRow"></div>
+
+      <div id="colorsSection">
+        <div class="section-label">Colors <span style="color:var(--text-muted); font-weight:400; text-transform:none; letter-spacing:0; font-size:9.5px;">— first &amp; last stops act as the two-color base for effects that need one</span></div>
+        <div class="palette-preview" id="palettePreview"></div>
+        <div class="palette-stops" id="paletteStops"></div>
+      </div>
+
+      <div id="pixelColorSection" style="display:none;">
+        <div class="section-label">Pixel Colors <span style="color:var(--text-muted); font-weight:400; text-transform:none; letter-spacing:0; font-size:9.5px;">— set each LED independently</span></div>
+        <div class="palette-stops" id="pixelColorGrid"></div>
+      </div>
+
+      <div class="section-label">Levels</div>
+      <div class="row">
+        <label>Bright</label>
+        <input type="range" id="brightness" min="0" max="255" value="128">
+      </div>
+      <div class="row">
+        <label>Speed</label>
+        <input type="range" id="speed" min="1" max="20" value="10">
+      </div>
+      <div class="row">
+        <label>LED Count</label>
+        <input type="text" id="ledCountInput" value="8" class="text-input" style="max-width:80px;" inputmode="numeric">
+        <button class="connect-btn" id="ledCountBtn" style="width:auto; margin-top:0; padding:9px 16px;">Set</button>
+      </div>
+      <div class="readout" id="ledCountReadout" style="margin-top:2px;">Confirmed 8 real addressable LEDs on this hardware (both fans mirror the same signal). Change this if your setup differs.</div>
+      <button class="connect-btn" id="saveSettingsBtn" style="margin-top:6px; background:linear-gradient(180deg, rgba(94,200,255,0.3), rgba(94,200,255,0.1)); border-color:rgba(94,200,255,0.35); color:var(--accent);">Save Current Settings</button>
+      <div class="readout" id="saveReadout" style="margin-top:2px;">Colors, effect, brightness, and speed persist across power cycles once saved. Not auto-saved — avoids wearing the flash out while you're experimenting.</div>
+    </div>
+
+    <div class="section-label">Connection</div>
+    <div class="tab-bar" id="connModeTabBar" style="margin-bottom:10px;">
+      <div class="slide-indicator"></div>
+      <button class="tab-btn active" id="modeBleBtn" data-mode="ble">Bluetooth</button>
+      <button class="tab-btn" id="modeWifiBtn" data-mode="wifi">WiFi</button>
+    </div>
+    <div class="row" id="wifiHostRow" style="display:none;">
+      <label>Host</label>
+      <input type="text" id="wifiTransportHost" value="bc250-argb.local" class="text-input">
+    </div>
+    <button class="connect-btn" id="connectBtn">Connect to BC250-ARGB</button>
+    <div class="readout" id="connReadout" style="margin-top:2px;">WiFi mode talks straight to the ESP32 over your network — no Web Bluetooth needed, works on Safari/iOS too. Requires the ESP32 already on WiFi (AP or router).</div>
+
+    <div id="wifiProvisionWrap">
+      <div class="section-label" id="wifiSectionLabel">WiFi Provisioning</div>
+      <div class="row">
+        <label>SSID</label>
+        <input type="text" id="wifiSsid" placeholder="Router name" class="text-input">
+      </div>
+      <div class="row">
+        <label>Password</label>
+        <input type="password" id="wifiPass" placeholder="Router password" class="text-input">
+      </div>
+      <button class="connect-btn" id="wifiProvisionBtn">Send WiFi Credentials (over BLE)</button>
+      <div class="readout" id="wifiReadout" style="margin-top:2px;">Provisions the router connection while BLE is connected. Direct hotspot: "BC250-ARGB-Direct" → 192.168.4.1</div>
+
+      <div id="routerStatusBlock" style="display:none; margin-top:14px;">
+        <div class="readout" id="routerStatusReadout" style="margin-bottom:8px;">checking status…</div>
+        <button class="connect-btn" id="wifiDisconnectBtn" style="display:none; background:linear-gradient(180deg, rgba(255,69,58,0.3), rgba(255,69,58,0.1)); border-color:rgba(255,69,58,0.35); color:#ffb0ab;">Disconnect from Router</button>
+        <div class="readout" style="margin-top:6px;">AP hotspot stays up regardless — this only drops the router link, never locks you out.</div>
+      </div>
+    </div>
+
+    <div class="section-label">Device</div>
+    <button class="connect-btn" id="restartBtn" style="background:linear-gradient(180deg, rgba(255,179,64,0.3), rgba(255,179,64,0.12)); border-color:rgba(255,179,64,0.35); color:#ffd9a0;">Restart ESP32</button>
+    <div class="readout" style="margin-top:2px; margin-bottom:14px;">Works over BLE or WiFi, whichever's connected.</div>
+  </div>
+</div>
+</div>
+
+<div class="page" id="page-sensors">
+  <div class="kpi-strip" id="kpiStrip"></div>
+
+  <div class="module-grid" id="moduleGrid"></div>
+</div>
+
+<div class="page" id="page-fan" hidden>
+  <div class="fan-hint" id="fanHint">checking fan controller…</div>
+  <div class="fan-toolbar">
+    <button id="fanSaveChangesBtn" disabled style="font-size:12px; font-weight:600; padding:8px 14px; border-radius:12px; cursor:pointer; border:1px solid rgba(94,200,255,0.35); color:var(--accent); background:linear-gradient(180deg, rgba(94,200,255,0.3), rgba(94,200,255,0.1));">Save Changes</button>
+    <button id="fanResetAllBtn" style="font-size:12px; font-weight:600; padding:8px 14px; border-radius:12px; cursor:pointer; border:1px solid rgba(255,69,58,0.35); color:#ffb0ab; background:linear-gradient(180deg, rgba(255,69,58,0.25), rgba(255,69,58,0.1));">Reset All Fans to Stock</button>
+  </div>
+
+  <div class="telemetry-card" style="margin-bottom:16px;">
+    <div class="telemetry-card-header">
+      <div class="telemetry-header-left">
+        <div class="telemetry-icon-badge">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.5-1 3-2.5 4M12 2a4 4 0 0 0-4 4c0 1.5 1 3 2.5 4M22 12a4 4 0 0 1-4 4c-1.5 0-3-1-4-2.5M22 12a4 4 0 0 0-4-4c-1.5 0-3 1-4 2.5M2 12a4 4 0 0 0 4 4c1.5 0 3-1 4-2.5M2 12a4 4 0 0 1 4-4c1.5 0 3 1 4 2.5M12 22a4 4 0 0 0 4-4c0-1.5-1-3-2.5-4M12 22a4 4 0 0 1-4-4c0-1.5 1-3 2.5-4"/></svg>
+        </div>
+        <div>
+          <div class="telemetry-title">Fan Header</div>
+          <div class="telemetry-subtitle" id="fanChannelCount">detecting channels…</div>
+        </div>
+      </div>
+      <span class="status-pill off" id="fanStatusPill">—</span>
+    </div>
+    <div style="padding:16px 18px;">
+      <div class="row" style="margin-bottom:14px;">
+        <label>Channel</label>
+        <select class="select-input" id="fanChannelSelect" disabled></select>
+      </div>
+      <div class="row" style="margin-bottom:14px;">
+        <label>RPM</label>
+        <div class="proc-cell" id="fanRpmReadout" style="font-size:14px;">—</div>
+      </div>
+
+      <div class="tab-bar" id="fanModeTabBar" style="margin-bottom:14px;">
+        <div class="slide-indicator"></div>
+        <button class="tab-btn active" id="fanModeAuto" data-fanmode="auto">Auto</button>
+        <button class="tab-btn" id="fanModeManual" data-fanmode="manual">Manual</button>
+        <button class="tab-btn" id="fanModeCurve" data-fanmode="curve">Curve</button>
+      </div>
+
+      <div class="row" id="fanPercentRow" style="display:none;">
+        <label>Speed</label>
+        <button class="fan-step-btn" id="fanPercentDown" aria-label="decrease">−</button>
+        <input type="range" id="fanPercent" min="0" max="100" value="50">
+        <button class="fan-step-btn" id="fanPercentUp" aria-label="increase">+</button>
+        <input type="number" id="fanPercentNum" class="fan-num-input" min="0" max="100" value="50">
+        <span style="font-size:12px; color:var(--text-muted);">%</span>
+      </div>
+      <div class="readout" id="fanWriteReadout" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <div class="telemetry-card" id="fanCurveCard" style="display:none;">
+    <div class="telemetry-card-header">
+      <div class="telemetry-header-left">
+        <div class="telemetry-icon-badge">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M3 17l5-6 4 4 9-11"/></svg>
+        </div>
+        <div>
+          <div class="telemetry-title">Fan Curve — <span id="curveChannelLabel">PWM —</span></div>
+          <div class="telemetry-subtitle">temp → speed%, evaluated by the server every poll tick - keeps running even with this tab closed</div>
+        </div>
+      </div>
+      <span class="status-pill off" id="curveStatusPill">Inactive</span>
+    </div>
+    <div style="padding:16px 18px;">
+      <div class="row" style="margin-bottom:14px;">
+        <label>Source</label>
+        <select class="select-input" id="curveSensorSelect">
+          <option value="cpu">CPU Temp</option>
+          <option value="gpu">APU Temp</option>
+          <option value="nvme_temp">NVMe Temp</option>
+        </select>
+      </div>
+
+      <div class="curve-graph-wrap">
+        <svg id="curveSvg" viewBox="0 0 640 260" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+      <div class="curve-hint">Click empty space to add a point, drag a point to move it, click a point to select it then remove it below. Needs at least 2 points. Edits here are saved by the <strong>Save Changes</strong> button up top, same as the manual slider.</div>
+
+      <div class="curve-toolbar">
+        <button id="curveRemovePoint" disabled>Remove Selected Point</button>
+        <button id="curveReset">Reset Curve Points (this channel only)</button>
+        <button id="curveEnableBtn" class="primary">Enable on This Channel</button>
+      </div>
+      <div class="readout" id="curveWriteReadout" style="margin-top:8px;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="page-processes" hidden>
+  <div class="proc-toolbar">
+    <div class="section-label" style="margin:0; padding:0; border:none;">Processes</div>
+    <div class="proc-count" id="procCount">—</div>
+  </div>
+  <input type="text" id="procSearch" class="text-input" placeholder="Search by name, PID, or user…" style="width:100%; margin-bottom:12px;">
+  <div class="proc-list">
+    <div class="proc-row proc-row-head">
+      <button class="proc-sort-btn" data-sort="name">Name <span class="arrow"></span></button>
+      <button class="proc-sort-btn" data-sort="pid">PID <span class="arrow"></span></button>
+      <button class="proc-sort-btn" data-sort="cpu">CPU <span class="arrow"></span></button>
+      <button class="proc-sort-btn" data-sort="mem">RAM <span class="arrow"></span></button>
+      <span></span>
+    </div>
+  </div>
+  <div class="proc-list" id="procList" style="margin-top:6px;"></div>
+  <div class="readout" id="procReadout" style="margin-top:10px;"></div>
+</div>
+
+<div class="page" id="page-terminal" hidden style="max-width:1100px;">
+  <div class="telemetry-card">
+    <div class="telemetry-card-header">
+      <div class="telemetry-header-left">
+        <div class="telemetry-icon-badge">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+        </div>
+        <div>
+          <div class="telemetry-title">Terminal</div>
+          <div class="telemetry-subtitle" id="termSubtitle">not connected</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span class="status-pill off" id="termStatusPill">Disconnected</span>
+        <button id="termRestartBtn" style="font-size:11px; font-weight:700; padding:6px 12px; border-radius:10px; cursor:pointer; border:1px solid var(--glass-border); color:var(--text); background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));">Restart</button>
+        <button id="termReconnectBtn" style="font-size:11px; font-weight:700; padding:6px 12px; border-radius:10px; cursor:pointer; border:1px solid var(--glass-border); color:var(--text); background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));">Reconnect</button>
+      </div>
+    </div>
+    <div id="termWrap" style="padding:12px;">
+      <div id="termContainer"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+
+<script>
+const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const CHAR_UUID    = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const STATUS_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+let LED_COUNT     = 8; // confirmed real addressable count on this hardware - now runtime-adjustable, synced from device on connect
+
+let device, server, characteristic;
+let latestSensorSnapshot = {}; // key -> value, refreshed every pollDashboard() tick; reused by the Fan Curve editor's local live preview
+let connected = false;
+let power = true, effect = 0, brightness = 128, speed = 10;
+let colorA = "#4de3d1", colorB = "#ff2e63";
+let paletteStops = ["#4de3d1", "#ff2e63"];
+
+const ledStrip   = document.getElementById('ledStrip');
+const statusText = document.getElementById('statusText');
+const readout    = document.getElementById('readout');
+const connectBtn = document.getElementById('connectBtn');
+const powerSwitch= document.getElementById('powerSwitch');
+const effectRow  = document.getElementById('effectRow');
+const paletteStopsEl = document.getElementById('paletteStops');
+const brightnessS= document.getElementById('brightness');
+const speedS     = document.getElementById('speed');
+const effectLabel= document.getElementById('effectLabel');
+const palettePreview = document.getElementById('palettePreview');
+
+// Positions a tab-group's sliding indicator to exactly match its currently-active
+// button. Shared by topnav-tabs and every tab-bar instance.
+function positionIndicator(container) {
+  if (!container) return;
+  const indicator = container.querySelector('.slide-indicator');
+  const active = container.querySelector('.active');
+  if (!indicator || !active) return;
+  const containerRect = container.getBoundingClientRect();
+  const btnRect = active.getBoundingClientRect();
+  indicator.style.width = btnRect.width + 'px';
+  indicator.style.transform = `translateX(${btnRect.left - containerRect.left}px)`;
+}
+function positionAllIndicators() {
+  ['topnavTabs', 'sysModeTabBar', 'connModeTabBar', 'fanModeTabBar'].forEach(id => positionIndicator(document.getElementById(id)));
+}
+window.addEventListener('resize', positionAllIndicators);
+
+// Remembers which top-level tab you were last on (RGB Control / System
+// Sensors / Fan Control / Processes / Terminal) so reopening the panel
+// doesn't always dump you back on the same tab. Plain localStorage - this
+// file is served and opened directly off the box, not previewed as a
+// claude.ai artifact, so there's a real persistent browser to hold it.
+const TAB_STORAGE_KEY = 'bc250_last_tab';
+const PAGES = ['rgb', 'sensors', 'fan', 'processes', 'terminal'];
+
+function activateTab(page, persist = true) {
+  if (!PAGES.includes(page)) page = 'sensors'; // matches the actual default below, not the old RGB-first behavior
+  document.querySelectorAll('.topnav-btn').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  PAGES.forEach(p => { document.getElementById('page-' + p).hidden = p !== page; });
+  positionIndicator(document.getElementById('topnavTabs'));
+  // Any sub-tab-bar living inside a page that ISN'T the default landing tab
+  // (sysModeTabBar/connModeTabBar in RGB Control, fanModeTabBar in Fan
+  // Control) got measured while still `hidden` on the initial page load -
+  // measuring a hidden element always returns zero size, so its indicator
+  // baked in at the wrong position/width permanently until something else
+  // recalculated it (any click on that tab-bar did, which is why it "fixed
+  // itself" on interaction). Recalculating everything on every tab switch,
+  // once the newly-shown page has actually painted, fixes this for good
+  // regardless of which tab happens to load first.
+  requestAnimationFrame(positionAllIndicators);
+  if (page === 'fan') { pollFan(); startFanPolling(); } else { stopFanPolling(); }
+  if (page === 'processes') { pollProcesses(); startProcPolling(); } else { stopProcPolling(); }
+  if (page === 'terminal') { connectTerminal(); } // deliberately no disconnect on leaving - the shell session stays alive in the background so tabbing away and back doesn't spawn a fresh shell (which was producing a new prompt line stacked on top of the last one every time)
+  if (persist) { try { localStorage.setItem(TAB_STORAGE_KEY, page); } catch (e) {} }
+}
+
+document.querySelectorAll('.topnav-btn').forEach(btn => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.page));
+});
+
+let savedTab = 'sensors';
+try { savedTab = localStorage.getItem(TAB_STORAGE_KEY) || 'sensors'; } catch (e) {}
+
+// Known sensor keys get nice labels/units/ranges/accent colors. Anything else still
+// renders fine with sensible defaults - this is the extension point: add an entry
+// here for better formatting, or just start sending SENS,newkey,value and it'll
+// auto-appear with a generic gray accent.
+const SENSOR_META = {
+  cpu:         { label: 'CPU Temp',        unit: '°C',  max: 100,  thresholds: [60, 75], accent: 'var(--phosphor)' },
+  cpu_freq:    { label: 'CPU Clock',       unit: 'MHz', max: 4500, thresholds: [99999, 99999], accent: 'var(--accent)' },
+  cpu_usage:   { label: 'CPU Usage',       unit: '%',   max: 100,  thresholds: [70, 90], accent: 'var(--accent)' },
+  cpu_cores:   { label: 'Cores',           unit: '',    max: 16,   thresholds: [99999, 99999], accent: 'var(--accent)', noGraph: true },
+  cpu_threads: { label: 'Threads',         unit: '',    max: 32,   thresholds: [99999, 99999], accent: 'var(--accent)', noGraph: true },
+  ram_used:    { label: 'RAM',             unit: 'MB',  max: 16000, thresholds: [99999, 99999], accent: 'var(--accent)' },
+  gpu:         { label: 'APU Temp',        unit: '°C',  max: 100,  thresholds: [60, 75], accent: '#f2994a' },
+  gpu_freq:    { label: 'APU Clock',       unit: 'MHz', max: 2000, thresholds: [99999, 99999], accent: '#f2994a' },
+  gpu_usage:   { label: 'APU Usage',       unit: '%',   max: 100,  thresholds: [70, 90], accent: '#f2994a' },
+  vram_used:   { label: 'VRAM',            unit: 'MB',  max: 512,  thresholds: [99999, 99999], accent: '#9b8cff' },
+  vrm:         { label: 'VRM Power',       unit: 'W',   max: 60,   thresholds: [20, 35], accent: 'var(--phosphor)' },
+  cpu_mv:      { label: 'CPU Core',        unit: 'mV',  max: 1500, thresholds: [99999, 99999], accent: 'var(--phosphor)' },
+  apu_mv:      { label: 'APU Core',        unit: 'mV',  max: 1500, thresholds: [99999, 99999], accent: 'var(--phosphor)' },
+  ppt:         { label: 'APU Power',       unit: 'W',   max: 60,   thresholds: [40, 50], accent: 'var(--phosphor)' },
+  fan:         { label: 'Fan Speed',       unit: 'RPM', max: 2500, thresholds: [99999, 99999], accent: 'var(--accent)' },
+  fan_pwm:     { label: 'Fan Curve',        unit: '%',   max: 100,  thresholds: [99999, 99999], accent: 'var(--accent)' },
+  nvme_temp:   { label: 'NVMe Temp',       unit: '°C',  max: 90,   thresholds: [55, 70], accent: '#5b93ff' },
+  disk_read:  { label: 'Disk Read',  unit: 'MB/s', max: 3000, thresholds: [99999, 99999], accent: '#5b93ff' },
+  disk_write: { label: 'Disk Write', unit: 'MB/s', max: 3000, thresholds: [99999, 99999], accent: '#5b93ff' },
+  cu_active:   { label: 'Compute Units',   unit: '',    max: 40,   thresholds: [99999, 99999], accent: '#e07856', noGraph: true },
+};
+function metaFor(key) {
+  return SENSOR_META[key] || { label: key.toUpperCase(), unit: '', max: 100, thresholds: [60, 80], accent: 'var(--text-muted)' };
+}
+const MEMORY_KEYS = new Set(['ram_used', 'vram_used']); // reported in MB from the backend - auto-scale to GB once large enough
+function formatMemoryValue(key, rawMB) {
+  if (!MEMORY_KEYS.has(key)) return null;
+  if (rawMB >= 1024) {
+    const gb = rawMB / 1024;
+    return { v: Math.round(gb * 10) / 10, unit: 'GB' }; // always 1 decimal, no exceptions - RAM/VRAM/anything else should match consistently
+  }
+  return { v: rawMB, unit: 'MB' };
+}
+const SEVERITY_COLOR = { ok: 'var(--accent)', warn: 'var(--phosphor)', bad: 'var(--danger)' };
+function severityColor(val, [lo, hi]) {
+  if (val >= hi) return SEVERITY_COLOR.bad;
+  if (val >= lo) return SEVERITY_COLOR.warn;
+  return SEVERITY_COLOR.ok;
+}
+
+// Which module card each sensor key belongs to. Unknown future keys fall
+// into a generic "Other" card automatically - so adding a new sensor never
+// gets silently dropped, it just needs a group entry here for a nicer home.
+// Note: this hardware has no discrete GPU - it's a single APU die, so the
+// graphics side is labeled "APU Graphics" rather than "GPU" throughout.
+const GROUP_META = {
+  cpu:     { title: 'Zen2',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>' },
+  gpu:     { title: 'RDNA2',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="8" cy="12" r="2"/><path d="M14 10h4M14 14h4"/></svg>' },
+  compute: { title: 'Cores',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg>' },
+  power:   { title: 'Power',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M13 2 3 14h6l-1 8 10-12h-6l1-8Z"/></svg>' },
+  fan:     { title: 'Cooling',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="2.2" fill="white" stroke="none"/><path d="M12 12c1.5-3 1-6-2-7.5S4.5 6 6 9M12 12c3 1.5 6 1 7.5-2S18 4.5 15 6M12 12c-1.5 3-1 6 2 7.5S19.5 18 18 15M12 12c-3-1.5-6-1-7.5 2S6 19.5 9 18"/></svg>' },
+  storage: { title: 'Storage',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M7 8V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><circle cx="7" cy="12" r="1" fill="white" stroke="none"/></svg>' },
+  other:   { title: 'Other',
+             icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>' },
+};
+// Fixed visual order for module cards - independent of whatever order sensor
+// data happens to arrive in, so Zen2/RDNA2 stay adjacent and predictable.
+const MODULE_ORDER = ['cpu', 'gpu', 'compute', 'power', 'fan', 'storage', 'other'];
+
+const KEY_TO_GROUP = {
+  cpu: 'cpu', cpu_freq: 'cpu', cpu_usage: 'cpu', ram_used: 'cpu',
+  gpu: 'gpu', gpu_freq: 'gpu', gpu_usage: 'gpu', vram_used: 'gpu',
+  cpu_cores: 'compute', cpu_threads: 'compute', cu_active: 'compute',
+  vrm: 'power', cpu_mv: 'power', apu_mv: 'power', ppt: 'power',
+  fan: 'fan', fan_pwm: 'fan',
+  nvme_temp: 'storage', disk_write: 'storage', disk_read: 'storage',
+};
+function groupFor(key) {
+  if (KEY_TO_GROUP[key]) return KEY_TO_GROUP[key];
+  if (key.startsWith('fan')) return 'fan'; // covers fan_pump, fan_sys1, fan_avg, etc - any board with N fans
+  return 'other';
+}
+
+const moduleGrid = document.getElementById('moduleGrid');
+const kpiStrip = document.getElementById('kpiStrip');
+const moduleCards = {}; // groupKey -> { cardEl, tileGrid, pill }
+const sensCards = {};   // sensorKey -> {val, poly, age, history: number[]}
+const HISTORY_LEN = 30;
+
+function ensureModuleCard(groupKey) {
+  if (moduleCards[groupKey]) return moduleCards[groupKey];
+  const meta = GROUP_META[groupKey] || GROUP_META.other;
+  const card = document.createElement('div');
+  card.className = 'telemetry-card';
+  card.innerHTML = `
+    <div class="telemetry-card-header">
+      <div class="telemetry-header-left">
+        ${meta.icon ? `<div class="telemetry-icon-badge">${meta.icon}</div>` : ''}
+        <div class="telemetry-title">${meta.title}</div>
+      </div>
+      <div class="status-pill off">—</div>
+    </div>
+    <div class="tile-grid"></div>
+  `;
+  moduleGrid.appendChild(card);
+  const refs = { cardEl: card, tileGrid: card.querySelector('.tile-grid'), pill: card.querySelector('.status-pill') };
+  moduleCards[groupKey] = refs;
+  reorderModuleGrid();
+  return refs;
+}
+
+function reorderModuleGrid() {
+  MODULE_ORDER.forEach(groupKey => {
+    if (moduleCards[groupKey]) moduleGrid.appendChild(moduleCards[groupKey].cardEl);
+  });
+}
+
+function ensureCard(key) {
+  if (sensCards[key]) return sensCards[key];
+  const meta = metaFor(key);
+  const group = ensureModuleCard(groupFor(key));
+  const tile = document.createElement('div');
+  tile.className = 'tile';
+  tile.innerHTML = `
+    <div class="tile-label">${meta.label}</div>
+    <div class="tile-value">— <span class="unit">${meta.unit}</span></div>
+    ${meta.noGraph ? '' : `<svg class="dash-sparkline" viewBox="0 0 200 24" preserveAspectRatio="none"><polyline fill="none" stroke="${meta.accent}" stroke-width="2" points=""/></svg>`}
+  `;
+  group.tileGrid.appendChild(tile);
+  const refs = {
+    val: tile.querySelector('.tile-value'),
+    unit: meta.unit,
+    poly: tile.querySelector('polyline'), // null if noGraph - pushSparkline guards for this
+    group: groupFor(key),
+    history: [],
+  };
+  sensCards[key] = refs;
+  return refs;
+}
+
+function pushSparkline(refs, val, max) {
+  if (!refs.poly) return; // this metric opted out of the graph (noGraph) - nothing to draw
+  refs.history.push(val);
+  if (refs.history.length > HISTORY_LEN) refs.history.shift();
+  const pts = refs.history.map((v, i) => {
+    const x = (i / (HISTORY_LEN - 1)) * 200;
+    const y = 26 - Math.min(26, (v / max) * 26);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  refs.poly.setAttribute('points', pts.join(' '));
+}
+
+const KPI_KEYS = ['cpu', 'gpu', 'ppt']; // headline metrics for the quick-glance strip
+const kpiPillCache = {}; // key -> {el, valueEl} - persistent, so updates don't restart the glow animation
+
+function ensureKpiPill(key, label) {
+  if (kpiPillCache[key]) return kpiPillCache[key];
+  const pill = document.createElement('div');
+  pill.className = 'kpi-pill';
+  pill.innerHTML = `<div><div class="kpi-pill-label">${label}</div><div class="kpi-pill-value">—</div></div>`;
+  kpiStrip.appendChild(pill);
+  const refs = { el: pill, valueEl: pill.querySelector('.kpi-pill-value') };
+  kpiPillCache[key] = refs;
+  return refs;
+}
+
+function updateKpiStrip(sensors) {
+  const byKey = Object.fromEntries(sensors.map(s => [s.k, s]));
+
+  KPI_KEYS.forEach(k => {
+    const s = byKey[k];
+    if (!s) return;
+    const meta = metaFor(k);
+    const formatted = formatMemoryValue(k, s.v);
+    const displayVal = formatted ? formatted.v : s.v;
+    const displayUnit = formatted ? formatted.unit : meta.unit;
+    const pill = ensureKpiPill(k, meta.label);
+    pill.valueEl.textContent = `${displayVal}${displayUnit === '°C' ? '°C' : displayUnit ? ' ' + displayUnit : ''}`;
+  });
+
+  // Compute pill combines cores/threads/CU into one summary rather than 3 separate pills
+  const cores = byKey.cpu_cores, threads = byKey.cpu_threads, cu = byKey.cu_active;
+  if (cores || threads || cu) {
+    const parts = [];
+    if (cores && threads) parts.push(`${cores.v}C/${threads.v}T`);
+    else if (cores) parts.push(`${cores.v}C`);
+    if (cu) parts.push(`${cu.v} CU`);
+    const pill = ensureKpiPill('_compute', 'Cores / CUs');
+    pill.valueEl.textContent = parts.join(' \u00b7 ');
+  }
+}
+
+function showEmptyState(reason) {
+  moduleGrid.innerHTML = `<div class="telemetry-card"><div class="dash-empty">${reason}</div></div>`;
+  kpiStrip.innerHTML = '';
+  Object.keys(sensCards).forEach(k => delete sensCards[k]);
+  Object.keys(moduleCards).forEach(k => delete moduleCards[k]);
+  Object.keys(kpiPillCache).forEach(k => delete kpiPillCache[k]);
+}
+
+function setPillState(pillEl, state) {
+  if (state === 'live') { pillEl.textContent = ''; pillEl.className = 'status-pill'; pillEl.style.display = 'none'; }
+  else { pillEl.textContent = 'STALE'; pillEl.className = 'status-pill off'; pillEl.style.display = ''; }
+}
+
+function updateSensorUI(sensors) {
+  if (sensors.length === 0) {
+    showEmptyState('No sensor data yet. Make sure the bc250-panel service is running (<code>systemctl --user status bc250-panel</code>).');
+    return;
+  }
+  if (moduleGrid.querySelector('.dash-empty')) moduleGrid.innerHTML = '';
+
+  updateKpiStrip(sensors);
+
+  const freshByGroup = {};
+  sensors.forEach(({ k, v, a }) => {
+    const meta = metaFor(k);
+    const el = ensureCard(k);
+    const formatted = formatMemoryValue(k, v);
+    if (formatted) {
+      el.val.innerHTML = `${formatted.v} <span class="unit">${formatted.unit}</span>`;
+    } else {
+      el.val.innerHTML = `${v} <span class="unit">${el.unit}</span>`;
+    }
+    // Thresholds exist per-sensor in the data model but are intentionally
+    // not used for coloring the value text - kept white/neutral.
+    pushSparkline(el, v, meta.max); // sparkline always tracks the raw MB value for a consistent scale
+    freshByGroup[el.group] = freshByGroup[el.group] || (a < 10);
+  });
+
+  Object.keys(moduleCards).forEach(g => {
+    setPillState(moduleCards[g].pill, freshByGroup[g] ? 'live' : 'off');
+  });
+}
+
+// Sensors page is fully independent of the ESP32/BLE - it just polls a plain
+// HTTP JSON endpoint served by the Go bc250-panel binary running on the box.
+// If that server isn't reachable (e.g. you're previewing the UI with the BC-250
+// off), it falls back to generated demo data instead of an error screen, so the
+// page is fully evaluable without any hardware connected.
+let dashPollTimer = null;
+
+// No hardcoded host - the panel and /api/sensors are always served from the
+// same origin now (one Go binary hosts both), so a relative path correctly
+// resolves whether you're on localhost, cachyos.local, or a raw LAN IP.
+// A hardcoded 'localhost:8091' broke remote access entirely, since
+// "localhost" in a remote browser means the REMOTE machine, not the BC-250.
+
+async function pollDashboard() {
+  try {
+    const res = await fetch(`/api/sensors`, { cache: 'no-store' });
+    const data = await res.json();
+    const sensors = data.sensors || [];
+    latestSensorSnapshot = Object.fromEntries(sensors.map(s => [s.k, s.v])); // reused by the Fan Curve editor's local live preview
+    updateSensorUI(sensors);
+  } catch (e) {
+    updateSensorUI([]);
+  }
+}
+function startDashboardPolling() {
+  if (dashPollTimer) clearInterval(dashPollTimer);
+  pollDashboard();
+  dashPollTimer = setInterval(pollDashboard, 2000);
+}
+startDashboardPolling();
+
+/* ---- Fan Control tab ---- */
+const fanHint          = document.getElementById('fanHint');
+const fanChannelCount  = document.getElementById('fanChannelCount');
+const fanStatusPill    = document.getElementById('fanStatusPill');
+const fanChannelSelect = document.getElementById('fanChannelSelect');
+const fanRpmReadout    = document.getElementById('fanRpmReadout');
+const fanModeAuto      = document.getElementById('fanModeAuto');
+const fanModeManual    = document.getElementById('fanModeManual');
+const fanModeCurve     = document.getElementById('fanModeCurve');
+const fanPercentRow    = document.getElementById('fanPercentRow');
+const fanPercentS      = document.getElementById('fanPercent');
+const fanPercentNum    = document.getElementById('fanPercentNum');
+const fanPercentDown   = document.getElementById('fanPercentDown');
+const fanPercentUp     = document.getElementById('fanPercentUp');
+const fanWriteReadout  = document.getElementById('fanWriteReadout');
+
+let fanPollTimer = null;
+let fanControllable = false;
+let fanDragging = false;      // suppress the poll's UI overwrite while the user's mid-drag
+let fanChannels = [];         // last-seen list of {index, enable, manual, percent, rpm, on_curve}
+let fanSelectedIndex = null;  // which pwmN the dropdown/controls are currently driving
+let fanHasPickedChannel = false; // true once the user (or the pwm2-default) has actually chosen a channel
+
+// This board's NCT6686 driver numbers fans differently from the BIOS Monitor
+// screen: BIOS Fan 1 (CPU_FAN1, the J4003 header's F1T/F1P pins) shows up as
+// Linux pwm2, and so on. Labeling both in the dropdown so "which physical
+// fan is this" doesn't require cross-referencing a wiki page every time.
+const LINUX_TO_BIOS_FAN = { 1: 5, 2: 1, 3: 2, 4: 3, 5: 4 };
+
+function currentFanChannel() {
+  return fanChannels.find(c => c.index === fanSelectedIndex) || null;
+}
+
+function rebuildFanChannelOptions() {
+  const prevSelection = fanSelectedIndex;
+  fanChannelSelect.innerHTML = '';
+  fanChannels.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.index;
+    const biosNum = LINUX_TO_BIOS_FAN[c.index];
+    const biosLabel = biosNum ? ` (BIOS Fan ${biosNum}${biosNum === 1 ? ' — CPU_FAN1' : ''})` : '';
+    opt.textContent = `PWM ${c.index}${biosLabel}` + (c.rpm > 0 ? ` — ${c.rpm} RPM` : '');
+    fanChannelSelect.appendChild(opt);
+  });
+  const stillExists = fanChannels.some(c => c.index === prevSelection);
+  if (stillExists) {
+    fanSelectedIndex = prevSelection;
+  } else if (!fanHasPickedChannel && fanChannels.some(c => c.index === 2)) {
+    // pwm2 is where the CPU fan is routed on this board (BIOS Fan 1 /
+    // CPU_FAN1) - default there rather than whatever the lowest-numbered
+    // channel happens to be.
+    fanSelectedIndex = 2;
+    fanHasPickedChannel = true;
+  } else {
+    fanSelectedIndex = fanChannels[0] ? fanChannels[0].index : null;
+  }
+  if (fanSelectedIndex !== null) fanChannelSelect.value = fanSelectedIndex;
+  fanChannelSelect.disabled = !fanControllable || fanChannels.length === 0;
+}
+
+function setSliderFill(el, pct) {
+  el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
+}
+
+function renderSelectedFanChannel() {
+  const ch = currentFanChannel();
+  if (!ch) {
+    fanRpmReadout.textContent = '—';
+    fanModeAuto.disabled = fanModeManual.disabled = fanModeCurve.disabled = true;
+    fanCurveCard.style.display = 'none';
+    return;
+  }
+  fanRpmReadout.textContent = ch.rpm > 0 ? `${ch.rpm} RPM` : '—';
+  fanModeAuto.disabled = fanModeManual.disabled = fanModeCurve.disabled = !fanControllable;
+  fanCurveCard.style.display = fanControllable ? 'block' : 'none';
+  curveChannelLabel.textContent = `PWM ${ch.index}`;
+
+  if (!fanDragging && !fanPercentDirty) {
+    const mode = ch.on_curve ? 'curve' : (ch.manual ? 'manual' : 'auto');
+    [fanModeAuto, fanModeManual, fanModeCurve].forEach(b => b.classList.remove('active'));
+    ({ auto: fanModeAuto, manual: fanModeManual, curve: fanModeCurve })[mode].classList.add('active');
+    positionIndicator(document.getElementById('fanModeTabBar'));
+    fanPercentRow.style.display = mode === 'manual' ? 'flex' : 'none';
+    fanPercentS.value = ch.percent;
+    fanPercentNum.value = Math.round(ch.percent);
+    setSliderFill(fanPercentS, ch.percent);
+    curveStatusPill.textContent = mode === 'curve' ? 'Active' : 'Inactive';
+    curveStatusPill.className = 'status-pill ' + (mode === 'curve' ? 'live' : 'off');
+  }
+}
+
+let lastFanHintKey = null;
+let fanHintHideTimer = null;
+
+async function pollFan() {
+  try {
+    const res = await fetch('/api/fan', { cache: 'no-store' });
+    const st = await res.json();
+    fanControllable = !!st.controllable;
+    fanChannels = st.channels || [];
+
+    // Only re-show/re-schedule the fade when the status actually changes -
+    // otherwise every 2s poll (which always re-reports the same "ok" status
+    // once things are working) would keep resetting the fade timer forever
+    // and the hint would never actually disappear.
+    const hintKey = (fanControllable ? 'ok' : 'bad') + '|' + (st.hint || '');
+    if (hintKey !== lastFanHintKey) {
+      lastFanHintKey = hintKey;
+      fanHint.textContent = st.hint || '';
+      fanHint.className = 'fan-hint ' + (fanControllable ? 'ok' : 'bad');
+      fanHint.classList.remove('fadeout');
+      if (fanHintHideTimer) clearTimeout(fanHintHideTimer);
+      if (fanControllable) {
+        // A working/controllable status is just a confirmation, not an
+        // ongoing problem - no need to permanently occupy screen space.
+        fanHintHideTimer = setTimeout(() => fanHint.classList.add('fadeout'), 5000);
+      }
+      // A "bad" status (no driver found, stock-only, etc.) is left showing
+      // persistently since it's actionable information, not a toast.
+    }
+    fanStatusPill.textContent = fanControllable ? `${fanChannels.length} channel${fanChannels.length === 1 ? '' : 's'}` : (st.driver === 'nct6683' ? 'Read-only' : 'Not found');
+    fanStatusPill.className = 'status-pill ' + (fanControllable ? 'live' : 'warn');
+    fanChannelCount.textContent = fanChannels.length
+      ? `${fanChannels.length} PWM channel${fanChannels.length === 1 ? '' : 's'} detected`
+      : 'no PWM channels detected';
+
+    rebuildFanChannelOptions();
+    renderSelectedFanChannel();
+  } catch (e) {
+    console.error('pollFan failed:', e);
+    lastFanHintKey = null; // force the hint to re-show/re-evaluate once the server's back
+    if (fanHintHideTimer) clearTimeout(fanHintHideTimer);
+    fanHint.textContent = 'Panel server unreachable - is bc250-panel running?';
+    fanHint.className = 'fan-hint bad';
+    fanHint.classList.remove('fadeout');
+    fanStatusPill.textContent = '—';
+    fanStatusPill.className = 'status-pill off';
+  }
+}
+function startFanPolling() {
+  if (fanPollTimer) clearInterval(fanPollTimer);
+  pollFan();
+  pollFanCurve();
+  fanPollTimer = setInterval(() => { pollFan(); pollFanCurve(); }, 2000);
+}
+function stopFanPolling() {
+  if (fanPollTimer) clearInterval(fanPollTimer);
+  fanPollTimer = null;
+}
+
+const fanResetAllBtn = document.getElementById('fanResetAllBtn');
+fanResetAllBtn.addEventListener('click', async () => {
+  if (!confirm('Reset ALL fan channels to stock/Auto? This clears every saved curve and manual setting on every channel, handing full control back to the BIOS/motherboard fan behavior.')) return;
+  fanResetAllBtn.disabled = true;
+  try {
+    const res = await fetch('/api/fan/reset', { method: 'POST' });
+    if (!res.ok) { const e = await res.json(); fanWriteReadout.textContent = e.error || 'reset failed'; }
+    else {
+      fanWriteReadout.textContent = 'reset to stock';
+      fanHasPickedChannel = false;
+      clearFanPercentDirty();
+      curveDirty = false;
+      updateSaveButtonState();
+    }
+  } catch (e) { fanWriteReadout.textContent = 'request failed'; }
+  fanResetAllBtn.disabled = false;
+  pollFan(); pollFanCurve();
+});
+
+fanChannelSelect.addEventListener('change', (e) => {
+  fanSelectedIndex = parseInt(e.target.value, 10);
+  fanHasPickedChannel = true;
+  clearFanPercentDirty(); // any unsaved percent edit belonged to the previous channel
+  renderSelectedFanChannel();
+  loadCurveIntoEditor();
+});
+
+async function setFanMode(mode) {
+  if (!fanControllable || fanSelectedIndex === null) return;
+  clearFanPercentDirty(); // switching mode always discards any unsaved slider edit, curve included - this was previously only done for auto/manual, leaving curve mode unable to ever re-sync the UI if a percent edit was pending
+  if (mode === 'curve') { curveEnableOnChannel(); return; }
+  const manual = mode === 'manual';
+  fanPercentRow.style.display = manual ? 'flex' : 'none';
+  [fanModeAuto, fanModeManual, fanModeCurve].forEach(b => b.classList.remove('active'));
+  (manual ? fanModeManual : fanModeAuto).classList.add('active');
+  positionIndicator(document.getElementById('fanModeTabBar'));
+  try {
+    const res = await fetch('/api/fan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index: fanSelectedIndex, enabled: manual })
+    });
+    if (!res.ok) { const e = await res.json(); fanWriteReadout.textContent = e.error || 'write failed'; return; }
+    fanWriteReadout.textContent = '';
+    curveStatusPill.textContent = 'Inactive'; curveStatusPill.className = 'status-pill off'; // any manual/auto write disables the curve server-side
+  } catch (e) { fanWriteReadout.textContent = 'request failed'; }
+}
+fanModeAuto.addEventListener('click', () => setFanMode('auto'));
+fanModeManual.addEventListener('click', () => setFanMode('manual'));
+fanModeCurve.addEventListener('click', () => setFanMode('curve'));
+
+// Staged, not live: dragging/typing (and curve point edits) only update the
+// UI locally and mark things dirty - nothing gets written to hardware or
+// saved server-side until "Save Changes" is clicked. One button covers both
+// the manual percent slider AND any pending curve-point edits, since they're
+// really the same underlying "you're mid-configuration, commit when ready"
+// idea - no reason to make the person hunt for two different save buttons.
+const fanSaveChangesBtn = document.getElementById('fanSaveChangesBtn');
+let fanPercentDirty = false;
+
+function updateSaveButtonState() {
+  const dirty = fanPercentDirty || curveDirty;
+  fanPercentNum.classList.toggle('dirty', fanPercentDirty);
+  fanSaveChangesBtn.disabled = !dirty;
+  fanSaveChangesBtn.textContent = dirty ? 'Save Changes*' : 'Save Changes';
+}
+
+function sendFanPercent(v) {
+  if (fanSelectedIndex === null) return Promise.resolve(false);
+  return fetch('/api/fan', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ index: fanSelectedIndex, percent: parseFloat(v) })
+  }).then(async res => {
+    if (!res.ok) { const e = await res.json(); fanWriteReadout.textContent = e.error || 'write failed'; return false; }
+    fanWriteReadout.textContent = '';
+    return true;
+  }).catch(() => { fanWriteReadout.textContent = 'request failed'; return false; });
+}
+function markFanPercentDirty() { fanPercentDirty = true; updateSaveButtonState(); }
+function clearFanPercentDirty() { fanPercentDirty = false; updateSaveButtonState(); }
+function updateFanPercentUI(v) {
+  v = Math.max(0, Math.min(100, v));
+  fanPercentS.value = v;
+  fanPercentNum.value = Math.round(v);
+  setSliderFill(fanPercentS, v);
+}
+fanPercentS.addEventListener('pointerdown', () => { fanDragging = true; });
+['pointerup', 'pointercancel'].forEach(ev => fanPercentS.addEventListener(ev, () => { fanDragging = false; }));
+fanPercentS.addEventListener('input', (e) => {
+  updateFanPercentUI(parseFloat(e.target.value));
+  markFanPercentDirty();
+});
+
+fanPercentNum.addEventListener('change', (e) => {
+  updateFanPercentUI(parseFloat(e.target.value) || 0);
+  markFanPercentDirty();
+});
+fanPercentDown.addEventListener('click', () => { updateFanPercentUI(parseFloat(fanPercentS.value) - 5); markFanPercentDirty(); });
+fanPercentUp.addEventListener('click',   () => { updateFanPercentUI(parseFloat(fanPercentS.value) + 5); markFanPercentDirty(); });
+
+fanSaveChangesBtn.addEventListener('click', async () => {
+  fanSaveChangesBtn.disabled = true;
+  fanSaveChangesBtn.textContent = 'Saving…';
+  let ok = true;
+  if (fanPercentDirty) {
+    const percentOk = await sendFanPercent(fanPercentS.value);
+    ok = ok && percentOk;
+    if (percentOk) fanPercentDirty = false;
+  }
+  if (curveDirty) {
+    const wasEnabled = allCurves[fanSelectedIndex] && allCurves[fanSelectedIndex].enabled;
+    const curveOk = await saveCurve(!!wasEnabled);
+    ok = ok && curveOk;
+    if (curveOk) { curveDirty = false; pollFanCurve(); }
+  }
+  updateSaveButtonState();
+  if (!ok) fanSaveChangesBtn.textContent = 'Save Changes*'; // leave it enabled/flagged so nothing silently gets lost
+});
+
+/* ---- Fan Curve editor ----
+   FanControl-style temp -> speed% graph: click empty space to add a point,
+   drag a point to move it, select + remove to delete. Saved server-side and
+   evaluated by the poll loop, so it keeps running with this tab closed. */
+const fanCurveCard      = document.getElementById('fanCurveCard');
+const curveChannelLabel = document.getElementById('curveChannelLabel');
+const curveStatusPill   = document.getElementById('curveStatusPill');
+const curveSensorSelect = document.getElementById('curveSensorSelect');
+const curveSvg          = document.getElementById('curveSvg');
+const curveRemoveBtn    = document.getElementById('curveRemovePoint');
+const curveResetBtn     = document.getElementById('curveReset');
+const curveEnableBtn    = document.getElementById('curveEnableBtn');
+const curveWriteReadout = document.getElementById('curveWriteReadout');
+
+const CURVE_TEMP_MIN = 20, CURVE_TEMP_MAX = 100;
+const CURVE_DEFAULT_POINTS = [{ temp: 40, percent: 30 }, { temp: 65, percent: 60 }, { temp: 85, percent: 100 }];
+const CURVE_PAD = { l: 46, r: 16, t: 16, b: 30 };
+const CURVE_W = 640, CURVE_H = 260;
+
+let allCurves = {};        // channel -> {channel, sensor, points, enabled}
+let curveLive = {};        // channel -> {temp, percent} - the SERVER's actual applied value (only populated for saved+enabled curves)
+let curvePoints = [...CURVE_DEFAULT_POINTS]; // points currently in the editor for the selected channel
+let curveSelected = -1;    // index into curvePoints currently selected
+let curveDraggingIdx = -1;
+let curveDirty = false;    // true once the editor has unsaved local edits - blocks the poll from clobbering them
+
+function tempToX(t) { return CURVE_PAD.l + (t - CURVE_TEMP_MIN) / (CURVE_TEMP_MAX - CURVE_TEMP_MIN) * (CURVE_W - CURVE_PAD.l - CURVE_PAD.r); }
+function pctToY(p)  { return CURVE_H - CURVE_PAD.b - p / 100 * (CURVE_H - CURVE_PAD.t - CURVE_PAD.b); }
+function xToTemp(x) { return CURVE_TEMP_MIN + (x - CURVE_PAD.l) / (CURVE_W - CURVE_PAD.l - CURVE_PAD.r) * (CURVE_TEMP_MAX - CURVE_TEMP_MIN); }
+function yToPct(y)  { return (CURVE_H - CURVE_PAD.b - y) / (CURVE_H - CURVE_PAD.t - CURVE_PAD.b) * 100; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Mirrors the server's evalCurve() exactly, so the preview shown while
+// editing matches what actually gets applied once saved.
+function evalCurveJS(points, temp) {
+  const sorted = [...points].sort((a, b) => a.temp - b.temp);
+  if (!sorted.length) return 0;
+  if (temp <= sorted[0].temp) return sorted[0].percent;
+  const last = sorted[sorted.length - 1];
+  if (temp >= last.temp) return last.percent;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const a = sorted[i], b = sorted[i + 1];
+    if (temp >= a.temp && temp <= b.temp) {
+      if (b.temp === a.temp) return a.percent;
+      const t = (temp - a.temp) / (b.temp - a.temp);
+      return a.percent + t * (b.percent - a.percent);
+    }
+  }
+  return last.percent;
+}
+
+function svgPointFromEvent(e) {
+  const rect = curveSvg.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) / rect.width * CURVE_W;
+  const sy = (e.clientY - rect.top) / rect.height * CURVE_H;
+  return { x: sx, y: sy };
+}
+
+function renderCurveGraph() {
+  const sorted = [...curvePoints].sort((a, b) => a.temp - b.temp);
+  let svg = '';
+
+  // gridlines every 20°C / 25%
+  for (let t = CURVE_TEMP_MIN; t <= CURVE_TEMP_MAX; t += 20) {
+    const x = tempToX(t);
+    svg += `<line x1="${x}" y1="${CURVE_PAD.t}" x2="${x}" y2="${CURVE_H - CURVE_PAD.b}" stroke="rgba(255,255,255,0.06)"/>`;
+    svg += `<text x="${x}" y="${CURVE_H - 10}" font-size="14" fill="var(--text-muted)" text-anchor="middle">${t}°</text>`;
+  }
+  for (let p = 0; p <= 100; p += 25) {
+    const y = pctToY(p);
+    svg += `<line x1="${CURVE_PAD.l}" y1="${y}" x2="${CURVE_W - CURVE_PAD.r}" y2="${y}" stroke="rgba(255,255,255,0.06)"/>`;
+    svg += `<text x="${CURVE_PAD.l - 8}" y="${y + 3}" font-size="14" fill="var(--text-muted)" text-anchor="end">${p}%</text>`;
+  }
+
+  // the curve line itself
+  if (sorted.length) {
+    const path = sorted.map((p, i) => `${i === 0 ? 'M' : 'L'} ${tempToX(p.temp)} ${pctToY(p.percent)}`).join(' ');
+    svg += `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>`;
+  }
+
+  // live marker: LOCAL preview computed instantly from whatever's currently
+  // in the editor (even if unsaved) + the latest known sensor reading - this
+  // is what makes the preview show up immediately instead of only after
+  // hitting Save. Shown in accent color.
+  const previewSensorKey = curveSensorSelect.value;
+  const previewTemp = latestSensorSnapshot[previewSensorKey];
+  if (typeof previewTemp === 'number' && sorted.length) {
+    const previewPct = evalCurveJS(curvePoints, previewTemp);
+    const lx = tempToX(clamp(previewTemp, CURVE_TEMP_MIN, CURVE_TEMP_MAX));
+    svg += `<line data-role="preview-line" x1="${lx}" y1="${CURVE_PAD.t}" x2="${lx}" y2="${CURVE_H - CURVE_PAD.b}" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.7"/>`;
+    svg += `<circle data-role="preview-circle" cx="${lx}" cy="${pctToY(clamp(previewPct, 0, 100))}" r="5" fill="var(--accent)"/>`;
+    svg += `<text data-role="preview-text" x="${lx}" y="${CURVE_PAD.t + 12}" font-size="14" fill="var(--accent)" text-anchor="middle">${Math.round(previewTemp)}° → ${Math.round(previewPct)}%</text>`;
+  }
+
+  // second marker: what's ACTUALLY currently applied server-side (only
+  // present once a curve is saved+enabled) - shown in warn color so it's
+  // visually distinct from the local preview above when they diverge
+  // (e.g. you've dragged a point but haven't hit Save yet).
+  const ch = currentFanChannel();
+  const live = ch ? curveLive[ch.index] : null;
+  if (live && typeof live.temp === 'number') {
+    const lx = tempToX(clamp(live.temp, CURVE_TEMP_MIN, CURVE_TEMP_MAX));
+    svg += `<circle cx="${lx}" cy="${pctToY(clamp(live.percent, 0, 100))}" r="4" fill="var(--warn)" stroke="#000" stroke-width="1"/>`;
+  }
+
+  // draggable points (rendered in curvePoints' original order so curveSelected stays valid)
+  curvePoints.forEach((p, i) => {
+    const sel = i === curveSelected;
+    const cx = tempToX(p.temp), cy = pctToY(p.percent);
+    // A visible 6-8 unit dot is precise-looking but, at mobile scale (this
+    // 640-unit viewBox rendered into a ~350px phone screen), that's only a
+    // few *physical* pixels across - nowhere near usable with a finger. The
+    // invisible circle underneath shares the same data-idx so a tap/drag
+    // anywhere within it still resolves to this point, without changing
+    // how small and precise the dot itself looks.
+    svg += `<circle data-idx="${i}" cx="${cx}" cy="${cy}" r="22" fill="transparent" style="cursor:pointer;"/>`;
+    svg += `<circle data-idx="${i}" cx="${cx}" cy="${cy}" r="${sel ? 8 : 6}"
+      fill="${sel ? 'var(--accent)' : '#fff'}" stroke="var(--accent-strong)" stroke-width="2" style="cursor:pointer; pointer-events:none;"/>`;
+  });
+
+  curveSvg.innerHTML = svg;
+  curveRemoveBtn.disabled = curveSelected < 0 || curvePoints.length <= 2;
+}
+
+curveSvg.addEventListener('pointerdown', (e) => {
+  e.preventDefault(); // stop the browser from starting a text-selection drag over the graph
+  const pt = svgPointFromEvent(e);
+  const target = e.target.closest('circle[data-idx]');
+  if (target) {
+    curveDraggingIdx = parseInt(target.dataset.idx, 10);
+    curveSelected = curveDraggingIdx;
+  } else {
+    // empty space - add a new point right there and let the same gesture drag it
+    curvePoints.push({ temp: roundToStep(clamp(xToTemp(pt.x), CURVE_TEMP_MIN, CURVE_TEMP_MAX), 1), percent: roundToStep(clamp(yToPct(pt.y), 0, 100), 1) });
+    curveSelected = curvePoints.length - 1;
+    curveDraggingIdx = curveSelected;
+  }
+  curveDirty = true;
+  updateSaveButtonState();
+  curveSvg.setPointerCapture(e.pointerId);
+  renderCurveGraph();
+});
+
+// During an active drag, only move the dragged point + redraw the line -
+// not the whole graph (gridlines, axis labels, live marker) - rebuilding
+// the entire SVG string on every single pointermove is what made dragging
+// feel sluggish. Full renderCurveGraph() still runs on release.
+function updateDraggedPointDOM(idx) {
+  const p = curvePoints[idx];
+  // Two circles now share this data-idx (a large invisible touch-target
+  // plus the small visible dot - see renderCurveGraph) - update both, or
+  // only the invisible one would track a live drag while the visible dot
+  // stayed frozen at its old spot until the next full re-render.
+  curveSvg.querySelectorAll(`circle[data-idx="${idx}"]`).forEach(circleEl => {
+    circleEl.setAttribute('cx', tempToX(p.temp));
+    circleEl.setAttribute('cy', pctToY(p.percent));
+  });
+  const pathEl = curveSvg.querySelector('path');
+  if (pathEl) {
+    const sorted = [...curvePoints].sort((a, b) => a.temp - b.temp);
+    pathEl.setAttribute('d', sorted.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${tempToX(pt.temp)} ${pctToY(pt.percent)}`).join(' '));
+  }
+  // keep the local preview marker live too - it's just 2-3 attribute
+  // updates, cheap enough to do every pointermove unlike a full rebuild
+  const previewTemp = latestSensorSnapshot[curveSensorSelect.value];
+  if (typeof previewTemp === 'number') {
+    const previewPct = evalCurveJS(curvePoints, previewTemp);
+    const py = pctToY(clamp(previewPct, 0, 100));
+    const pc = curveSvg.querySelector('circle[data-role="preview-circle"]');
+    const pt2 = curveSvg.querySelector('text[data-role="preview-text"]');
+    if (pc) pc.setAttribute('cy', py);
+    if (pt2) { pt2.textContent = `${Math.round(previewTemp)}° → ${Math.round(previewPct)}%`; }
+  }
+}
+curveSvg.addEventListener('pointermove', (e) => {
+  if (curveDraggingIdx < 0) return;
+  e.preventDefault();
+  const pt = svgPointFromEvent(e);
+  curvePoints[curveDraggingIdx] = {
+    temp: roundToStep(clamp(xToTemp(pt.x), CURVE_TEMP_MIN, CURVE_TEMP_MAX), 1),
+    percent: roundToStep(clamp(yToPct(pt.y), 0, 100), 1),
+  };
+  updateDraggedPointDOM(curveDraggingIdx);
+});
+['pointerup', 'pointercancel'].forEach(ev => curveSvg.addEventListener(ev, () => {
+  curveDraggingIdx = -1;
+  renderCurveGraph(); // full redraw once, to refresh the Remove-point button state etc.
+}));
+
+function roundToStep(v, step) { return Math.round(v / step) * step; }
+
+curveRemoveBtn.addEventListener('click', () => {
+  if (curveSelected < 0 || curvePoints.length <= 2) return;
+  curvePoints.splice(curveSelected, 1);
+  curveSelected = -1;
+  curveDirty = true;
+  updateSaveButtonState();
+  renderCurveGraph();
+});
+curveResetBtn.addEventListener('click', () => {
+  curvePoints = CURVE_DEFAULT_POINTS.map(p => ({ ...p }));
+  curveSelected = -1;
+  curveDirty = true; // stays local-only (and the poll won't clobber it) until Save Changes is clicked
+  updateSaveButtonState();
+  curveWriteReadout.textContent = 'default points loaded - click Save Changes to persist';
+  renderCurveGraph();
+});
+
+async function saveCurve(enabled) {
+  if (fanSelectedIndex === null) return false;
+  if (enabled && curvePoints.length < 2) {
+    curveWriteReadout.textContent = 'need at least 2 points to enable a curve';
+    return false;
+  }
+  try {
+    const res = await fetch('/api/fancurves', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: fanSelectedIndex, sensor: curveSensorSelect.value, points: curvePoints, enabled })
+    });
+    if (!res.ok) { const e = await res.json(); curveWriteReadout.textContent = e.error || 'save failed'; return false; }
+    curveWriteReadout.textContent = 'saved';
+    curveDirty = false; // now safe for the poll to sync from the server again
+    updateSaveButtonState();
+    return true;
+  } catch (e) { curveWriteReadout.textContent = 'request failed'; return false; }
+}
+async function curveEnableOnChannel() {
+  const ok = await saveCurve(true);
+  if (ok) { curveStatusPill.textContent = 'Active'; curveStatusPill.className = 'status-pill live'; pollFan(); pollFanCurve(); }
+  return ok;
+}
+curveEnableBtn.addEventListener('click', curveEnableOnChannel);
+
+function loadCurveIntoEditor() {
+  const c = allCurves[fanSelectedIndex];
+  curvePoints = c && c.points && c.points.length ? c.points.map(p => ({ ...p })) : CURVE_DEFAULT_POINTS.map(p => ({ ...p }));
+  curveSensorSelect.value = c ? c.sensor : 'cpu';
+  curveSelected = -1;
+  curveDirty = false; // switching channels always discards any unsaved edits on the previous one
+  updateSaveButtonState();
+  renderCurveGraph();
+}
+
+async function pollFanCurve() {
+  try {
+    const res = await fetch('/api/fancurves', { cache: 'no-store' });
+    const data = await res.json();
+    allCurves = {};
+    (data.curves || []).forEach(c => { allCurves[c.channel] = c; });
+    curveLive = {};
+    Object.entries(data.live || {}).forEach(([k, v]) => { curveLive[parseInt(k, 10)] = v; });
+    if (fanSelectedIndex !== null && !curveDirty && curveDraggingIdx < 0) {
+      // only refresh the editor's points from the server when there are no
+      // unsaved local edits, so a poll tick can never clobber them - this
+      // covers dragging AND button-driven edits like Reset Curve Points.
+      //
+      // When the server reports NO curve at all for this channel (e.g.
+      // right after Reset All Fans to Stock cleared every curve), fall
+      // back to the same defaults loadCurveIntoEditor() uses on a fresh
+      // channel switch - previously this branch only ever updated
+      // curvePoints when a curve DID exist, so a reset left the old
+      // (now-stale) points sitting in the editor until a full page reload
+      // re-initialized things from scratch. Now the live UI actually
+      // reflects "fully defaulted" immediately, no reload needed.
+      const c = allCurves[fanSelectedIndex];
+      const hadCurve = c && c.points && c.points.length;
+      curvePoints = hadCurve ? c.points.map(p => ({ ...p })) : CURVE_DEFAULT_POINTS.map(p => ({ ...p }));
+      curveSensorSelect.value = c ? c.sensor : 'cpu';
+      if (!hadCurve) curveSelected = -1; // avoid a stale selection index coincidentally highlighting the wrong point in the fresh default set
+    }
+    renderCurveGraph();
+  } catch (e) { /* fan poll's own error state already covers "server unreachable" */ }
+}
+
+curveSensorSelect.addEventListener('change', () => { curveDirty = true; updateSaveButtonState(); curveWriteReadout.textContent = ''; renderCurveGraph(); });
+
+/* ---- Processes tab ----
+   Keeps row identity stable across polls (update in place rather than
+   rebuild the whole list every 2s) so a row you're reaching for to click
+   Kill doesn't jump or get swapped out from under the cursor. Re-sorting by
+   CPU% is paused entirely while the mouse is over the list - exits and new
+   processes still appear/disappear, they just don't reshuffle the order
+   while you're interacting. */
+const procList   = document.getElementById('procList');
+const procCount  = document.getElementById('procCount');
+const procSearch = document.getElementById('procSearch');
+const procReadout = document.getElementById('procReadout');
+let procPollTimer = null;
+let procHovering = false;
+let procRowEls = new Map();   // pid -> {row, nameEl, userEl, cpuEl, memEl, killBtn}
+let procOrder = [];           // current display order of pids
+
+procList.addEventListener('mouseenter', () => { procHovering = true; });
+procList.addEventListener('mouseleave', () => { procHovering = false; });
+
+// Task-manager-style clickable column headers: click to sort by that
+// column, click the active one again to flip direction. Numeric columns
+// default to descending (biggest first, matches Task Manager's own
+// default), name defaults ascending (alphabetical makes more sense than
+// reverse-alphabetical as a first click).
+let procSortKey = 'cpu';
+let procSortDir = 'desc';
+const PROC_SORT_DEFAULT_DIR = { name: 'asc', pid: 'asc', cpu: 'desc', mem: 'desc' };
+
+function procComparator(a, b) {
+  let cmp;
+  switch (procSortKey) {
+    case 'name': cmp = a.name.localeCompare(b.name); break;
+    case 'pid':  cmp = a.pid - b.pid; break;
+    case 'mem':  cmp = a.mem_mb - b.mem_mb; break;
+    default:     cmp = a.cpu - b.cpu; break;
+  }
+  return procSortDir === 'asc' ? cmp : -cmp;
+}
+
+function updateProcSortHeaderUI() {
+  document.querySelectorAll('.proc-sort-btn').forEach(btn => {
+    const active = btn.dataset.sort === procSortKey;
+    btn.classList.toggle('active', active);
+    const arrow = btn.querySelector('.arrow');
+    arrow.textContent = active ? (procSortDir === 'asc' ? '▲' : '▼') : '';
+  });
+}
+updateProcSortHeaderUI();
+
+document.querySelectorAll('.proc-sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.sort;
+    if (key === procSortKey) {
+      procSortDir = procSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      procSortKey = key;
+      procSortDir = PROC_SORT_DEFAULT_DIR[key] || 'asc';
+    }
+    updateProcSortHeaderUI();
+    pollProcesses(); // re-sort immediately rather than waiting for the next poll tick
+  });
+});
+
+function fmtMem(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB'; }
+
+function makeProcRow(p) {
+  const row = document.createElement('div');
+  row.className = 'proc-row';
+  row.innerHTML = `
+    <div class="proc-name-wrap">
+      <div class="proc-name"></div>
+      <div class="proc-user"></div>
+    </div>
+    <div class="proc-cell"></div>
+    <div class="proc-cell"></div>
+    <div class="proc-cell"></div>
+    <div></div>`;
+  const nameEl = row.querySelector('.proc-name');
+  const userEl = row.querySelector('.proc-user');
+  const [pidEl, cpuEl, memEl] = row.querySelectorAll('.proc-cell');
+  const killBtn = document.createElement('button');
+  killBtn.className = 'kill-btn';
+  killBtn.textContent = 'Kill';
+  killBtn.addEventListener('click', () => killPid(p.pid, nameEl.textContent, killBtn));
+  row.lastElementChild.appendChild(killBtn);
+  pidEl.textContent = p.pid;
+  return { row, nameEl, userEl, cpuEl, memEl, killBtn };
+}
+
+function updateProcRow(refs, p) {
+  if (refs.nameEl.textContent !== p.name) { refs.nameEl.textContent = p.name; refs.nameEl.title = p.name; }
+  if (refs.userEl.textContent !== p.user) refs.userEl.textContent = p.user;
+  const cpuText = p.cpu.toFixed(1) + '%';
+  if (refs.cpuEl.textContent !== cpuText) refs.cpuEl.textContent = cpuText;
+  const memText = fmtMem(p.mem_mb);
+  if (refs.memEl.textContent !== memText) refs.memEl.textContent = memText;
+}
+
+async function pollProcesses() {
+  try {
+    const res = await fetch('/api/processes', { cache: 'no-store' });
+    const data = await res.json();
+    let procs = data.processes || []; // server sends CPU-desc by default, but we re-sort client-side per procSortKey/procSortDir below
+
+    const q = procSearch.value.trim().toLowerCase();
+    if (q) {
+      procs = procs.filter(p => p.name.toLowerCase().includes(q) || String(p.pid).includes(q) || p.user.toLowerCase().includes(q));
+    }
+
+    procs.sort(procComparator);
+
+    const byPid = new Map(procs.map(p => [p.pid, p]));
+
+    if (procHovering) {
+      // keep the existing on-screen order; drop pids that exited, append any
+      // brand-new pids at the end rather than resorting the whole list
+      procOrder = procOrder.filter(pid => byPid.has(pid));
+      procs.forEach(p => { if (!byPid.has(p.pid) || procOrder.includes(p.pid)) return; procOrder.push(p.pid); });
+    } else {
+      procOrder = procs.map(p => p.pid);
+    }
+
+    // remove rows for pids no longer present
+    for (const [pid, refs] of procRowEls) {
+      if (!byPid.has(pid)) { refs.row.remove(); procRowEls.delete(pid); }
+    }
+    // create/update rows and (re)attach in display order
+    procOrder.forEach(pid => {
+      const p = byPid.get(pid);
+      let refs = procRowEls.get(pid);
+      if (!refs) { refs = makeProcRow(p); procRowEls.set(pid, refs); }
+      updateProcRow(refs, p);
+      procList.appendChild(refs.row); // no-op if already in the right spot, moves it otherwise
+    });
+
+    procCount.textContent = `${procs.length} shown${q ? ' (filtered)' : ''}, sorted by ${procSortKey.toUpperCase()} ${procSortDir === 'asc' ? '↑' : '↓'}` + (procHovering ? ' — order paused while hovering' : '');
+    procReadout.textContent = '';
+  } catch (e) {
+    console.error('pollProcesses failed:', e);
+    procReadout.textContent = 'Panel server unreachable: ' + (e && e.message ? e.message : 'unknown error');
+  }
+}
+function startProcPolling() {
+  if (procPollTimer) clearInterval(procPollTimer);
+  pollProcesses();
+  procPollTimer = setInterval(pollProcesses, 2000);
+}
+function stopProcPolling() {
+  if (procPollTimer) clearInterval(procPollTimer);
+  procPollTimer = null;
+}
+let procSearchDebounce = null;
+procSearch.addEventListener('input', () => {
+  clearTimeout(procSearchDebounce);
+  procSearchDebounce = setTimeout(pollProcesses, 200);
+});
+
+async function killPid(pid, name, btn) {
+  if (!confirm(`Kill "${name}" (PID ${pid})? This sends SIGTERM.`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/kill', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pid, signal: 'TERM' })
+    });
+    if (!res.ok) { const e = await res.json(); procReadout.textContent = e.error || 'kill failed'; btn.disabled = false; return; }
+    setTimeout(pollProcesses, 300);
+  } catch (e) {
+    procReadout.textContent = 'request failed';
+    btn.disabled = false;
+  }
+}
+
+let dots = [];
+function regenerateDots() {
+  ledStrip.innerHTML = '';
+  for (let i = 0; i < LED_COUNT; i++) {
+    const d = document.createElement('div');
+    d.className = 'led-dot';
+    ledStrip.appendChild(d);
+  }
+  dots = [...ledStrip.children];
+}
+regenerateDots();
+
+document.getElementById('ledCountBtn').addEventListener('click', () => {
+  const input = document.getElementById('ledCountInput');
+  const n = parseInt(input.value, 10);
+  const out = document.getElementById('ledCountReadout');
+  if (!Number.isInteger(n) || n < 1 || n > 60) { out.textContent = 'enter a number between 1 and 60'; return; }
+  LED_COUNT = n;
+  document.getElementById('ledCountLabel').textContent = n;
+  regenerateDots();
+  renderPixelColorGrid();
+  sendCmd(`LEDCOUNT,${n}`);
+  out.textContent = `set to ${n} LEDs`;
+});
+
+let pixelColors = [];
+let pixelColorThrottle = null;
+function sendPixelColors() {
+  sendCmd(`PIXELS,${pixelColors.map(c => c.replace('#','')).join(',')}`);
+}
+function throttledSendPixelColors() {
+  if (pixelColorThrottle) clearTimeout(pixelColorThrottle);
+  pixelColorThrottle = setTimeout(sendPixelColors, 150);
+}
+function renderPixelColorGrid() {
+  const grid = document.getElementById('pixelColorGrid');
+  grid.innerHTML = '';
+  // Grow/shrink to match the current LED count, keeping existing colors where possible
+  while (pixelColors.length < LED_COUNT) pixelColors.push(colorA);
+  pixelColors.length = LED_COUNT;
+  pixelColors.forEach((color, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'stop-wrap';
+    const input = document.createElement('input');
+    input.type = 'color'; input.value = color; input.title = `LED ${i}`;
+    input.addEventListener('input', (e) => { pixelColors[i] = e.target.value; throttledSendPixelColors(); });
+    wrap.appendChild(input);
+    grid.appendChild(wrap);
+  });
+}
+renderPixelColorGrid();
+
+const EFFECT_NAMES = ['Solid','Rainbow','Breathe','Chase','Gradient','Twinkle','Wipe','Theater','Theater2','Scanner','Fire','Sparkle','ColorLoop','Meteor','Bounce','Strobe','Confetti','PaletteFlow','WipeRandom','DualScan','RunningLights','Saw','Dissolve','AlertFlash','Sinelon','Popcorn','Ripple','Glitter','Candle','Heartbeat','GradientFlow','PixelColors'];
+
+// Grouped by feel, not alphabetically - matches the Sensors page's card-grouping
+// pattern so scanning 33 effects doesn't mean reading one flat wall of buttons.
+const EFFECT_CATEGORIES = [
+  { label: 'Static', effects: ['Solid','Gradient','ColorLoop','PixelColors'] },
+  { label: 'Sweeping Motion', effects: ['Rainbow','Chase','Wipe','WipeRandom','Theater','Theater2','Scanner','DualScan','RunningLights','Saw','Sinelon','Bounce','Meteor','GradientFlow'] },
+  { label: 'Sparkle & Noise', effects: ['Twinkle','Sparkle','Confetti','Dissolve','Popcorn','Glitter','Ripple'] },
+  { label: 'Organic', effects: ['Fire','Candle','PaletteFlow'] },
+  { label: 'Pulse & Alert', effects: ['Breathe','Strobe','AlertFlash','Heartbeat'] },
+];
+
+EFFECT_CATEGORIES.forEach(cat => {
+  const label = document.createElement('div');
+  label.className = 'eff-category-label';
+  label.textContent = cat.label;
+  effectRow.appendChild(label);
+
+  const row = document.createElement('div');
+  row.className = 'eff-category-row';
+  cat.effects.forEach(name => {
+    const i = EFFECT_NAMES.indexOf(name);
+    const b = document.createElement('button');
+    b.className = 'eff-btn' + (i === 0 ? ' active' : '');
+    b.textContent = name;
+    b.dataset.eff = i;
+    row.appendChild(b);
+  });
+  effectRow.appendChild(row);
+});
+
+function hexToRgb(hex){ const v = hex.replace('#',''); return [parseInt(v.substr(0,2),16), parseInt(v.substr(2,2),16), parseInt(v.substr(4,2),16)]; }
+function lerp(a,b,t){ return Math.round(a + (b-a)*t); }
+
+function renderPalettePreview() {
+  palettePreview.style.background = `linear-gradient(90deg, ${paletteStops.join(',')})`;
+}
+function syncColorABFromPalette() {
+  colorA = paletteStops[0];
+  colorB = paletteStops[paletteStops.length - 1];
+}
+function sendPalette() {
+  syncColorABFromPalette();
+  sendCmd(`PAL,${paletteStops.map(c=>c.replace('#','')).join(',')}`);
+  sendCmd(`CA,${colorA.replace('#','')}`);
+  sendCmd(`CB,${colorB.replace('#','')}`);
+}
+// Which effects actually use what, categorized directly from the firmware
+// code (not guessed) - showing "add a gradient stop" for an effect that only
+// ever reads colorA would be misleading, since stops beyond the first would
+// have zero visible effect.
+const COLOR_MODE_BY_EFFECT = {
+  Solid:'oneColor', Breathe:'oneColor', Chase:'oneColor', Gradient:'palette',
+  Twinkle:'oneColor', Wipe:'oneColor', Theater:'oneColor', Theater2:'twoColor',
+  Scanner:'oneColor', Fire:'oneColor', Sparkle:'oneColor', Meteor:'oneColor',
+  Bounce:'twoColor', Strobe:'oneColor', Confetti:'palette', PaletteFlow:'palette',
+  WipeRandom:'palette', DualScan:'twoColor', RunningLights:'oneColor', Saw:'oneColor',
+  Dissolve:'oneColor', AlertFlash:'twoColor', Sinelon:'oneColor', Popcorn:'palette',
+  Ripple:'oneColor', Glitter:'oneColor', Candle:'oneColor', Heartbeat:'oneColor',
+  GradientFlow:'palette', Rainbow:'none', ColorLoop:'none', PixelColors:'none',
+};
+function getColorMode() { return COLOR_MODE_BY_EFFECT[EFFECT_NAMES[effect]] || 'palette'; }
+
+function renderPaletteStops() {
+  paletteStopsEl.innerHTML = '';
+  const mode = getColorMode();
+  const visibleStops = mode === 'oneColor' ? [paletteStops[0]]
+                      : mode === 'twoColor' ? [paletteStops[0], paletteStops[paletteStops.length - 1]]
+                      : paletteStops;
+  const showButtons = mode === 'palette';
+
+  visibleStops.forEach((color, vi) => {
+    // Map back to the REAL index in paletteStops so edits land on the right stop
+    // (twoColor's second swatch is the LAST stop, not index 1, if there are middle stops hidden)
+    const i = mode === 'twoColor' && vi === 1 ? paletteStops.length - 1 : vi;
+    const wrap = document.createElement('div');
+    wrap.className = 'stop-wrap';
+    const input = document.createElement('input');
+    input.type = 'color'; input.value = color;
+    input.addEventListener('input', (e) => { paletteStops[i] = e.target.value; renderPalettePreview(); syncColorABFromPalette(); throttledSendPalette(); });
+    wrap.appendChild(input);
+    if (showButtons && paletteStops.length > 2) {
+      const rm = document.createElement('button');
+      rm.className = 'stop-remove'; rm.textContent = '×';
+      rm.onclick = () => { paletteStops.splice(i,1); renderPaletteStops(); renderPalettePreview(); sendPalette(); };
+      wrap.appendChild(rm);
+    }
+    paletteStopsEl.appendChild(wrap);
+  });
+  if (showButtons && paletteStops.length < 6) {
+    const add = document.createElement('button');
+    add.className = 'add-stop-btn'; add.textContent = '+';
+    add.onclick = () => {
+      // Insert BEFORE the last stop, not after it - paletteStops[last] doubles
+      // as Color B, so appending here was silently turning your actual second
+      // color white every time you added a stop, demoting it to a middle waypoint.
+      paletteStops.splice(paletteStops.length - 1, 0, '#ffffff');
+      renderPaletteStops(); renderPalettePreview(); sendPalette();
+    };
+    paletteStopsEl.appendChild(add);
+  }
+}
+syncColorABFromPalette();
+renderPaletteStops();
+renderPalettePreview();
+updateColorSectionsForEffect(); // sets correct initial visibility for the default effect (Solid = oneColor)
+
+let connMode = 'ble'; // 'ble' or 'wifi'
+let sysMode = 'NATIVE'; // 'NATIVE' or 'E131' - tracked locally, synced from device when possible
+const wifiHostInput = document.getElementById('wifiTransportHost');
+const connReadout = document.getElementById('connReadout');
+
+function applySyncedLedState(led) {
+  if (!led) return;
+  power = led.power;
+  powerSwitch.classList.toggle('on', power);
+  effect = led.effect;
+  document.querySelectorAll('.eff-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.eff) === effect));
+  updateColorSectionsForEffect();
+  brightness = led.brightness; brightnessS.value = brightness; syncBrightnessFill();
+  speed = led.speed; speedS.value = speed; syncSpeedFill();
+  if (led.colorA) colorA = '#' + led.colorA;
+  if (led.colorB) colorB = '#' + led.colorB;
+  if (Array.isArray(led.palette) && led.palette.length >= 2) {
+    paletteStops = led.palette.map(h => '#' + h);
+    renderPaletteStops(); renderPalettePreview();
+  }
+  if (led.ledCount) {
+    LED_COUNT = led.ledCount;
+    document.getElementById('ledCountInput').value = LED_COUNT;
+    document.getElementById('ledCountLabel').textContent = LED_COUNT;
+    regenerateDots();
+  }
+  if (led.sysMode) setSystemMode(led.sysMode, true);
+  effectLabel.textContent = sysMode === 'E131' ? 'MODE: EXTERNAL (E1.31)' : 'MODE: ' + (EFFECT_NAMES[effect] || '').toUpperCase();
+  readout.textContent = "synced to saved device state";
+}
+
+async function connectBLE() {
+  if (!navigator.bluetooth) { readout.textContent = "Web Bluetooth not supported — use Chrome or Edge, or switch to WiFi mode above."; return; }
+  try {
+    readout.textContent = "requesting device…";
+    device = await navigator.bluetooth.requestDevice({ filters: [{ name: 'BC250-ARGB' }], optionalServices: [SERVICE_UUID] });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    readout.textContent = "connecting…";
+    server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    characteristic = await service.getCharacteristic(CHAR_UUID);
+    connected = true;
+    statusText.textContent = "CONNECTED"; statusText.classList.add('on');
+    connectBtn.textContent = "Disconnect"; connectBtn.classList.add('connected');
+    try {
+      const statusChar = await service.getCharacteristic(STATUS_UUID);
+      const raw = await statusChar.readValue();
+      const parsed = JSON.parse(new TextDecoder().decode(raw));
+      applySyncedLedState(parsed.led);
+    } catch (e) { readout.textContent = "connected, but couldn't read saved state: " + e.message; }
+  } catch (err) { readout.textContent = "connection failed: " + err.message; }
+}
+
+async function connectWiFi() {
+  const host = wifiHostInput.value.trim();
+  if (!host) { readout.textContent = "enter the ESP32's host or IP first"; return; }
+  readout.textContent = "checking connection…";
+  try {
+    const res = await fetch(`http://${host}/status`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const parsed = await res.json();
+    connected = true;
+    statusText.textContent = "CONNECTED"; statusText.classList.add('on');
+    connectBtn.textContent = "Disconnect"; connectBtn.classList.add('connected');
+    applySyncedLedState(parsed.led);
+  } catch (err) {
+    readout.textContent = `can't reach ${host} — check it's on WiFi and the address is right`;
+  }
+}
+
+function onDisconnected() {
+  connected = false;
+  statusText.textContent = "DISCONNECTED"; statusText.classList.remove('on');
+  connectBtn.textContent = "Connect to BC250-ARGB"; connectBtn.classList.remove('connected');
+  readout.textContent = "link lost";
+  bleWriteQueue = Promise.resolve(); // don't carry a stale write chain into the next connection
+
+  // Deliberately NOT stopping wifiStatusTimer here - it keeps polling every 4s
+  // in the background regardless of connection state, and pollWifiStatus()
+  // already handles fetch failures gracefully (shows "can't reach ESP32").
+  // That means it naturally self-heals once the device comes back up after a
+  // restart, rather than getting stuck needing a manual re-trigger.
+  const disconnectBtn = document.getElementById('wifiDisconnectBtn');
+  if (disconnectBtn) disconnectBtn.style.display = 'none';
+}
+
+let bleWriteQueue = Promise.resolve(); // every BLE write chains onto this, guaranteeing true serialization
+                                        // regardless of how many different UI triggers fire in quick succession
+                                        // (rapid palette dragging was overlapping writes before this existed,
+                                        // causing "GATT operation already in progress" and silently dropped commands)
+async function sendCmd(cmd) {
+  if (!connected) return;
+  if (connMode === 'wifi') {
+    const host = wifiHostInput.value.trim();
+    try { await fetch(`http://${host}/cmd?c=${encodeURIComponent(cmd)}`, { cache: 'no-store' }); }
+    catch (err) { readout.textContent = "send failed: " + err.message; }
+    return;
+  }
+  if (!characteristic) return;
+  bleWriteQueue = bleWriteQueue
+    .then(() => characteristic.writeValue(new TextEncoder().encode(cmd)))
+    .catch(err => { readout.textContent = "write failed: " + err.message; });
+  return bleWriteQueue;
+}
+async function sendAll() {
+  await sendCmd(`PWR,${power ? 1 : 0}`);
+  await sendCmd(`CA,${colorA.replace('#','')}`);
+  await sendCmd(`CB,${colorB.replace('#','')}`);
+  await sendCmd(`PAL,${paletteStops.map(c=>c.replace('#','')).join(',')}`);
+  await sendCmd(`BRI,${brightness}`);
+  await sendCmd(`EFF,${effect}`);
+  await sendCmd(`SPD,${speed}`);
+}
+
+connectBtn.addEventListener('click', () => {
+  if (connected) {
+    if (connMode === 'ble' && device) device.gatt.disconnect();
+    else onDisconnected();
+  } else {
+    if (connMode === 'ble') connectBLE(); else connectWiFi();
+  }
+});
+
+document.getElementById('modeBleBtn').addEventListener('click', () => {
+  if (sysMode === 'E131') {
+    alert('E1.31 needs WiFi to keep running — switch System Mode back to Native first if you want to use Bluetooth.');
+    return;
+  }
+  setConnMode('ble');
+});
+document.getElementById('modeWifiBtn').addEventListener('click', () => setConnMode('wifi'));
+function setConnMode(mode) {
+  if (connected && connMode === 'ble' && device && device.gatt && device.gatt.connected) {
+    // Actually tell the browser to close the real Bluetooth link - the
+    // 'gattserverdisconnected' listener (registered in connectBLE) fires
+    // onDisconnected() automatically once this completes. Without this, only
+    // the panel's own UI/state reset, but the real BLE connection stayed
+    // open in the background - and since firmware's AP/BLE mutual-exclusion
+    // logic still saw an active BLE client, it correctly kept WiFi suspended,
+    // which is exactly why switching to WiFi mode didn't work right away.
+    device.gatt.disconnect();
+  } else if (connected) {
+    onDisconnected(); // WiFi mode has no persistent connection object to close, just reset state
+  }
+  connMode = mode;
+  document.getElementById('modeBleBtn').classList.toggle('active', mode === 'ble');
+  document.getElementById('modeWifiBtn').classList.toggle('active', mode === 'wifi');
+  document.getElementById('wifiHostRow').style.display = mode === 'wifi' ? 'flex' : 'none';
+  document.getElementById('wifiSectionLabel').textContent = mode === 'wifi' ? 'Router Connection' : 'WiFi Provisioning';
+  document.getElementById('wifiProvisionBtn').textContent = mode === 'wifi' ? 'Connect to Router' : 'Send WiFi Credentials (over BLE)';
+  document.getElementById('routerStatusBlock').style.display = mode === 'wifi' ? 'block' : 'none';
+  connReadout.textContent = mode === 'wifi'
+    ? "WiFi mode talks straight to the ESP32 over your network — no Web Bluetooth needed, works on Safari/iOS too. Requires the ESP32 already on WiFi (AP or router)."
+    : "Bluetooth mode uses Web Bluetooth (Chrome/Edge only, not Safari/iOS).";
+  document.getElementById('wifiReadout').textContent = mode === 'wifi'
+    ? 'Connects the ESP32 to your router while keeping the AP hotspot ("BC250-ARGB-Direct") active too — never one-or-the-other.'
+    : 'Provisions the router connection while BLE is connected. Direct hotspot: "BC250-ARGB-Direct" → 192.168.4.1';
+  if (wifiStatusTimer) { clearInterval(wifiStatusTimer); wifiStatusTimer = null; }
+  if (mode === 'wifi') {
+    pollWifiStatus();
+    wifiStatusTimer = setInterval(pollWifiStatus, 4000);
+  }
+  positionIndicator(document.getElementById('connModeTabBar'));
+}
+
+let wifiStatusTimer = null;
+setConnMode('ble'); // sync all mode-dependent UI to the actual default state on load
+
+function updateLedControlsDisabled() {
+  document.getElementById('ledControlsWrap').classList.toggle('disabled', sysMode === 'E131');
+}
+
+function setSystemMode(mode, fromRemoteSync) {
+  sysMode = mode;
+  document.getElementById('modeSysNative').classList.toggle('active', mode === 'NATIVE');
+  document.getElementById('modeSysE131').classList.toggle('active', mode === 'E131');
+  updateLedControlsDisabled();
+  const out = document.getElementById('sysModeReadout');
+  out.textContent = mode === 'E131'
+    ? 'External control active (E1.31) — effect/color controls below are disabled since this panel isn\'t driving the LEDs right now. Requires WiFi (AP or router) on the sending end; E1.31 can\'t run over Bluetooth.'
+    : 'This panel is driving the LEDs. Switch to E1.31 to hand control to OpenRGB or another external sender.';
+  effectLabel.textContent = mode === 'E131' ? 'MODE: EXTERNAL (E1.31)' : 'MODE: ' + EFFECT_NAMES[effect].toUpperCase();
+  if (!fromRemoteSync) sendCmd(`SYSMODE,${mode}`);
+  positionIndicator(document.getElementById('sysModeTabBar'));
+}
+
+document.getElementById('modeSysNative').addEventListener('click', () => setSystemMode('NATIVE'));
+document.getElementById('modeSysE131').addEventListener('click', () => {
+  if (connMode !== 'wifi') {
+    alert('E1.31 is a network protocol and needs WiFi — switch to WiFi mode in the Connection section first. It can\'t run over Bluetooth.');
+    return;
+  }
+  setSystemMode('E131');
+});
+async function pollWifiStatus() {
+  const host = wifiHostInput.value.trim();
+  const readout = document.getElementById('routerStatusReadout');
+  if (!host) return;
+  try {
+    const res = await fetch(`http://${host}/wifistatus`, { cache: 'no-store' });
+    const s = await res.json();
+    lastWifiStatus = s;
+    readout.innerHTML = s.staConnected
+      ? `Router: <b style="color:var(--accent)">${s.staSsid}</b> (${s.staIp}) &nbsp;·&nbsp; AP: ${s.apClients} client(s) on ${s.apIp}`
+      : `Router: not connected &nbsp;·&nbsp; AP: "${s.apSsid}" active, ${s.apClients} client(s) on ${s.apIp}`;
+    document.getElementById('wifiDisconnectBtn').style.display = s.staConnected ? 'block' : 'none';
+    if (s.sysMode && s.sysMode !== sysMode) setSystemMode(s.sysMode, true); // pick up mode changes made from elsewhere
+    if (s.sysMode === 'E131') {
+      const out = document.getElementById('sysModeReadout');
+      out.textContent = s.e131Live
+        ? 'External control active (E1.31) — receiving live data.'
+        : 'External control active (E1.31) — waiting for a sender... LEDs show dim grey until data arrives.';
+    }
+  } catch (e) {
+    readout.textContent = "can't reach ESP32 to check WiFi status";
+    document.getElementById('wifiDisconnectBtn').style.display = 'none';
+  }
+}
+let lastWifiStatus = null;
+
+powerSwitch.addEventListener('click', () => {
+  power = !power; powerSwitch.classList.toggle('on', power);
+  sendCmd(`PWR,${power ? 1 : 0}`);
+});
+
+function updateColorSectionsForEffect() {
+  const isPixelColors = effect === EFFECT_NAMES.indexOf('PixelColors');
+  document.getElementById('pixelColorSection').style.display = isPixelColors ? 'block' : 'none';
+
+  const mode = getColorMode();
+  // Colors/Gradient Palette is irrelevant for Pixel Colors mode (own separate
+  // control) and for Rainbow/ColorLoop (they cycle their own hue wheel, never
+  // read colorA/colorB/palette at all) - hide it rather than leave it sitting
+  // there looking editable but doing nothing.
+  document.getElementById('colorsSection').style.display = (mode === 'none') ? 'none' : 'block';
+  // The gradient bar implies a smooth blend - misleading for oneColor/twoColor
+  // effects that only ever read discrete colorA/colorB, not an interpolation.
+  document.getElementById('palettePreview').style.display = (mode === 'palette') ? 'block' : 'none';
+  renderPaletteStops(); // re-render for the new mode - 1 swatch / 2 swatches / full editor
+}
+
+effectRow.addEventListener('click', (e) => {
+  const btn = e.target.closest('.eff-btn'); if (!btn) return;
+  effectRow.querySelectorAll('.eff-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  effect = parseInt(btn.dataset.eff);
+  effectLabel.textContent = "MODE: " + EFFECT_NAMES[effect].toUpperCase();
+  sendCmd(`EFF,${effect}`);
+  updateColorSectionsForEffect();
+});
+
+
+
+document.getElementById('wifiProvisionBtn').addEventListener('click', async () => {
+  const ssid = document.getElementById('wifiSsid').value.trim();
+  const pass = document.getElementById('wifiPass').value;
+  const out = document.getElementById('wifiReadout');
+  if (!connected) { out.textContent = `connect over ${connMode === 'wifi' ? 'WiFi' : 'BLE'} first`; return; }
+  if (!ssid) { out.textContent = "enter a network name"; return; }
+  await sendCmd(`WIFI,${ssid},${pass}`);
+  out.textContent = connMode === 'wifi'
+    ? `sent — connecting to router now (AP stays up too, you won't lose this session)`
+    : `sent — router creds saved, will connect once BLE disconnects`;
+  if (connMode === 'wifi') setTimeout(pollWifiStatus, 3000);
+});
+
+document.getElementById('wifiDisconnectBtn').addEventListener('click', async () => {
+  const host = wifiHostInput.value.trim();
+  const isRawIp = /^\d+\.\d+\.\d+\.\d+$/.test(host);
+  const onApSubnet = host.startsWith('192.168.4.');
+  // If they're on a raw router-assigned IP (not the .local name, not the fixed AP
+  // subnet), disconnecting from the router is the one action that could actually
+  // cut this exact session - worth a real confirmation, not a silent action.
+  if (isRawIp && !onApSubnet) {
+    const proceed = confirm(
+      `You're connected via a router-assigned IP (${host}). Disconnecting from the router will change that IP and likely drop this session.\n\n` +
+      `The ESP32 itself will be fine — its AP hotspot ("BC250-ARGB-Direct", 192.168.4.1) and Bluetooth stay available regardless. ` +
+      `You'd just need to reconnect through one of those.\n\nDisconnect from the router anyway?`
+    );
+    if (!proceed) return;
+  }
+  await sendCmd('WIFIOFF');
+  document.getElementById('routerStatusReadout').textContent = "disconnecting from router…";
+  setTimeout(pollWifiStatus, 1500);
+});
+
+document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+  const out = document.getElementById('saveReadout');
+  if (!connected) { out.textContent = "connect first, then save"; return; }
+  await sendCmd('SAVE');
+  out.textContent = "saved — this will persist across power cycles now";
+  setTimeout(() => { out.textContent = "Colors, effect, brightness, and speed persist across power cycles once saved. Not auto-saved — avoids wearing the flash out while you're experimenting."; }, 3000);
+});
+
+document.getElementById('restartBtn').addEventListener('click', async () => {
+  if (!connected) { readout.textContent = "connect first, then restart"; return; }
+  const proceed = confirm("Restart the ESP32 now? Any unsaved LED settings will be lost - use Save Current Settings first if you want to keep them.");
+  if (!proceed) return;
+  await sendCmd('RESTART');
+  onDisconnected();
+  readout.textContent = "restarting… reconnect in a few seconds";
+  if (connMode === 'wifi') pollWifiStatus(); // immediate feedback instead of waiting up to 4s for the next tick
+});
+
+/* ---- throttled sliders: fixes the "stuck on fast" bug from unthrottled rapid BLE writes ---- */
+function makeThrottledSlider(el, buildCmd, applyLocal) {
+  let lastSent = 0, pending = null;
+  const syncFill = () => setSliderFill(el, (el.value - el.min) / (el.max - el.min) * 100);
+  syncFill();
+  el.addEventListener('input', (e) => {
+    applyLocal(e.target.value);
+    syncFill();
+    const now = performance.now();
+    if (now - lastSent > 120) { lastSent = now; sendCmd(buildCmd(e.target.value)); pending = null; }
+    else {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => { lastSent = performance.now(); sendCmd(buildCmd(el.value)); }, 130);
+    }
+  });
+  el.addEventListener('change', (e) => { sendCmd(buildCmd(e.target.value)); }); // guarantees final value always lands
+  return syncFill; // exposed so external code that sets el.value directly (e.g. loading saved settings) can resync the fill
+}
+const syncBrightnessFill = makeThrottledSlider(brightnessS, v => `BRI,${v}`, v => brightness = parseInt(v));
+const syncSpeedFill      = makeThrottledSlider(speedS,      v => `SPD,${v}`, v => speed = parseInt(v));
+
+let paletteThrottle = null;
+function throttledSendPalette() {
+  if (paletteThrottle) clearTimeout(paletteThrottle);
+  paletteThrottle = setTimeout(sendPalette, 150);
+}
+
+/* ---- local preview animation (approximates what the fans should be doing) ---- */
+let hue=0, breathePhase=0, chasePos=0, wipePos=0, wipeDir=1, twinkleAccum=0;
+let wipeRandomColor='#4de3d1', dualScan1=0, dualScan2=LED_COUNT-1, dualScanDir1=1, dualScanDir2=-1;
+let runningPhase=0, sawPhase=0;
+let dissolveState=new Array(LED_COUNT).fill(false), dissolveAccum=0;
+let policeAccum=0, policePhase=false;
+let sinelonPhase=0;
+let popcornState=new Array(LED_COUNT).fill(0), popcornAccum=0;
+let rippleOrigin=-1, ripplePos=0, rippleAccum=0;
+let glitterFlash=-1, glitterAccum=0;
+let heartbeatPhase=0;
+let gradFlowPhase=0;
+let rainbowAccum=0, colorLoopAccum=0, paletteFlowAccum=0, runningAccum=0, sawAccum=0, gradFlowAccum=0, heartbeatAccum=0;
+let breatheAccum=0, chaseAccum=0, bounceAccum=0, dualScanAccum=0;
+let wipeAccum=0, theaterAccum=0, theater2Accum=0, theaterOffset2=0, scannerAccum=0, meteorAccum=0, wipeRandomAccum=0;
+let theaterOffset=0, scannerPos=0, scannerDir=1, sparkleAccum=0, sparkleFlash=-1, loopHue=0;
+let meteorPos=0, bouncePos=0, bounceDir=1, bounceUseB=false, strobeOn=false, strobeAccum=0;
+let fireState=new Array(LED_COUNT).fill('#000000'), fireAccum=0;
+let candleState=new Array(LED_COUNT).fill(1), candleAccum=0;
+let flowPhase=0, confettiAccum=0;
+const confettiState = new Array(LED_COUNT).fill(null);
+
+function paletteColorAt(idx01) { // idx01: 0..1 position across the custom palette
+  const rgbs = paletteStops.map(hexToRgb);
+  if (rgbs.length < 2) return paletteStops[0] || '#000000';
+  const segLen = 1/(rgbs.length-1);
+  let seg = Math.floor(idx01/segLen); if (seg >= rgbs.length-1) seg = rgbs.length-2;
+  const t = (idx01 - seg*segLen)/segLen;
+  const a = rgbs[seg], b = rgbs[seg+1];
+  return `rgb(${lerp(a[0],b[0],t)},${lerp(a[1],b[1],t)},${lerp(a[2],b[2],t)})`;
+}
+
+let lastTickTime = 0;
+function tick() {
+  // Throttle to firmware's actual ~16ms tick rate regardless of the real
+  // display refresh rate - without this, a 120/144Hz monitor makes every
+  // gated effect run proportionally faster in preview than on real hardware,
+  // since requestAnimationFrame just fires at whatever rate the screen refreshes.
+  const now = performance.now();
+  if (now - lastTickTime < 16) { requestAnimationFrame(tick); return; }
+  lastTickTime = now;
+
+  if (sysMode === 'E131') {
+    // Panel isn't driving the LEDs in this mode - an animated preview here would
+    // be actively misleading. Show a dim static state and skip everything else.
+    dots.forEach(d => { d.style.background='#1a1a18'; d.style.boxShadow='inset 0 0 2px rgba(0,0,0,0.6)'; d.style.opacity='0.3'; });
+    document.querySelector('.chassis-unit')?.style.setProperty('--glow-color', 'rgba(255,255,255,0.12)');
+    requestAnimationFrame(tick);
+    return;
+  }
+  if (!power) {
+    dots.forEach(d => { d.style.background='#1a1a18'; d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)'; });
+    document.querySelector('.chassis-unit')?.style.setProperty('--glow-color', 'rgba(255,255,255,0.1)'); // dim the ambient glow while powered off instead of leaving it stuck on the last bright color
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  if (effect === 0) dots.forEach(d => setDot(d, colorA, brightness/255));
+  else if (effect === 1) { rainbowAccum+=speed; if(rainbowAccum>=10){rainbowAccum=0; hue=(hue+4*360/256)%360;} dots.forEach((d,i)=>setDot(d,`hsl(${(hue+i*(360/LED_COUNT))%360},90%,50%)`,brightness/255)); }
+  else if (effect === 2) { breatheAccum+=speed; if(breatheAccum>=60){breatheAccum=0; breathePhase=(breathePhase+8)%256;} const level=(Math.sin(breathePhase/255*2*Math.PI)+1)/2; dots.forEach(d=>setDot(d,colorA,(brightness/255)*level)); }
+  else if (effect === 3) { chaseAccum+=speed; if(chaseAccum>=160){chaseAccum=0; chasePos=(chasePos+1)%LED_COUNT;} dots.forEach((d,i)=>{const dist=(i-chasePos+LED_COUNT)%LED_COUNT; setDot(d,colorA,(brightness/255)*Math.max(0,1-dist/4));}); }
+  else if (effect === 4) { dots.forEach((d,i)=>{const t=i/(LED_COUNT-1); setDot(d,paletteColorAt(t),brightness/255);}); }
+  else if (effect === 5) { twinkleAccum+=speed; if(twinkleAccum>=120){twinkleAccum=0; sparkleFlash=Math.floor(Math.random()*LED_COUNT);} dots.forEach((d,i)=>setDot(d,colorA,i===sparkleFlash?brightness/255:0.05)); }
+  else if (effect === 6) { wipeAccum+=speed; if(wipeAccum>=48){wipeAccum=0; wipePos+=wipeDir; if(wipePos>=LED_COUNT-1||wipePos<=0) wipeDir*=-1;} dots.forEach((d,i)=>{ if(i<=wipePos) setDot(d,colorA,brightness/255); else {d.style.background='#1a1a18';d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)';} }); }
+  else if (effect === 7) { theaterAccum+=speed; if(theaterAccum>=160){theaterAccum=0; theaterOffset=(theaterOffset+1)%3;} dots.forEach((d,i)=>{ const on=(i+theaterOffset)%3===0; if(on) setDot(d,colorA,brightness/255); else {d.style.background='#1a1a18';d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)';} }); }
+  else if (effect === 8) { theater2Accum+=speed; if(theater2Accum>=160){theater2Accum=0; theaterOffset2=(theaterOffset2+1)%3;} dots.forEach((d,i)=>{ const lit=(i+theaterOffset2)%3===0; const groupB=Math.floor((i+theaterOffset2)/3)%2===1; if(lit) setDot(d,groupB?colorB:colorA,brightness/255); else {d.style.background='#1a1a18';d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)';} }); }
+  else if (effect === 9) { scannerAccum+=speed; if(scannerAccum>=48){scannerAccum=0; scannerPos+=scannerDir; if(scannerPos>=LED_COUNT-1||scannerPos<=0) scannerDir*=-1;} dots.forEach((d,i)=>{const dist=Math.abs(i-scannerPos); setDot(d,colorA,(brightness/255)*Math.max(0,1-dist/3));}); }
+  else if (effect === 10) { // fire
+    fireAccum+=speed;
+    if (fireAccum>=96) {
+      fireAccum=0;
+      const base=hexToRgb(colorA);
+      fireState = fireState.map(()=>{ const heat=0.4+Math.random()*0.6; return `rgb(${Math.round(base[0]*heat)},${Math.round(base[1]*heat/3)},${Math.round(base[2]*heat/6)})`; });
+    }
+    dots.forEach((d,i)=>setDot(d, fireState[i], brightness/255));
+  }
+  else if (effect === 11) { sparkleAccum+=speed; if(sparkleAccum>=80){sparkleAccum=0; sparkleFlash=Math.floor(Math.random()*LED_COUNT);} dots.forEach((d,i)=>setDot(d,i===sparkleFlash?'#ffffff':colorA,brightness/255)); }
+  else if (effect === 12) { colorLoopAccum+=speed; if(colorLoopAccum>=60){colorLoopAccum=0; loopHue=(loopHue+3)%360;} const c=`hsl(${loopHue},90%,55%)`; dots.forEach(d=>setDot(d,c,brightness/255)); }
+  else if (effect === 13) { meteorAccum+=speed; if(meteorAccum>=48){meteorAccum=0; meteorPos=(meteorPos+1)%LED_COUNT;} dots.forEach((d,i)=>{const dist=(i-meteorPos+LED_COUNT)%LED_COUNT; setDot(d,colorA,(brightness/255)*Math.max(0,1-dist/3));}); }
+  else if (effect === 14) { bounceAccum+=speed; if(bounceAccum>=48){bounceAccum=0; bouncePos+=bounceDir; if(bouncePos>=LED_COUNT-1||bouncePos<=0){bounceDir*=-1; bounceUseB=!bounceUseB;}} dots.forEach((d,i)=>{ const on=Math.abs(i-bouncePos)<=1; setDot(d,on?(bounceUseB?colorB:colorA):'#1a1a18', on?brightness/255:0.05); }); }
+  else if (effect === 15) { strobeAccum+=speed; if(strobeAccum>=120){strobeAccum=0; strobeOn=!strobeOn;} dots.forEach(d=>setDot(d, strobeOn?colorA:'#1a1a18', strobeOn?brightness/255:0.05)); }
+  else if (effect === 16) { confettiAccum+=speed; if(confettiAccum>=64){confettiAccum=0; confettiState[Math.floor(Math.random()*LED_COUNT)]=paletteColorAt(Math.random());} dots.forEach((d,i)=>setDot(d, confettiState[i]||'#1a1a18', confettiState[i]?brightness/255:0.05)); }
+  else if (effect === 17) { paletteFlowAccum+=speed; if(paletteFlowAccum>=8){paletteFlowAccum=0; flowPhase=(flowPhase+4)%256;} dots.forEach((d,i)=>setDot(d, paletteColorAt(((flowPhase+i*(256/LED_COUNT))%256)/256), brightness/255)); }
+  else if (effect === 18) { // wipe random
+    wipeRandomAccum+=speed;
+    if (wipeRandomAccum>=48){ wipeRandomAccum=0; wipePos+=wipeDir; if(wipePos>=LED_COUNT-1||wipePos<=0){ wipeDir*=-1; wipeRandomColor = paletteColorAt(Math.random()); } }
+    dots.forEach((d,i)=>{ if(i<=wipePos) setDot(d,wipeRandomColor,brightness/255); else {d.style.background='#1a1a18';d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)';} });
+  }
+  else if (effect === 19) { // dual scan
+    dualScanAccum+=speed; if(dualScanAccum>=48){dualScanAccum=0; dualScan1+=dualScanDir1; if(dualScan1>=LED_COUNT-1||dualScan1<=0) dualScanDir1*=-1; dualScan2+=dualScanDir2; if(dualScan2>=LED_COUNT-1||dualScan2<=0) dualScanDir2*=-1;}
+    dots.forEach((d,i)=>{
+      const d1=Math.abs(i-dualScan1), d2=Math.abs(i-dualScan2);
+      if(d1<3) setDot(d,colorA,(brightness/255)*Math.max(0,1-d1/3));
+      else if(d2<3) setDot(d,colorB,(brightness/255)*Math.max(0,1-d2/3));
+      else {d.style.background='#1a1a18';d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)';}
+    });
+  }
+  else if (effect === 20) { runningAccum+=speed; if(runningAccum>=10){runningAccum=0; runningPhase=(runningPhase+4)%256;} dots.forEach((d,i)=>{const lvl=(Math.sin((runningPhase+i*(255/LED_COUNT))/40)+1)/2; setDot(d,colorA,(brightness/255)*lvl);}); }
+  else if (effect === 21) { sawAccum+=speed; if(sawAccum>=10){sawAccum=0; sawPhase=(sawPhase+4)%256;} dots.forEach((d,i)=>{const lvl=((sawPhase+i*(256/LED_COUNT))%256)/255; setDot(d,colorA,(brightness/255)*lvl);}); }
+  else if (effect === 22) { // dissolve
+    dissolveAccum+=speed; if(dissolveAccum>=48){dissolveAccum=0; const i=Math.floor(Math.random()*LED_COUNT); dissolveState[i]=!dissolveState[i];}
+    dots.forEach((d,i)=>setDot(d, dissolveState[i]?colorA:'#1a1a18', dissolveState[i]?brightness/255:0.05));
+  }
+  else if (effect === 23) { policeAccum+=speed; if(policeAccum>=160){policeAccum=0; policePhase=!policePhase;} dots.forEach(d=>setDot(d, policePhase?colorA:colorB, brightness/255)); }
+  else if (effect === 24) { sinelonPhase+=speed*0.03; const pos=Math.round(((Math.sin(sinelonPhase)+1)/2)*(LED_COUNT-1)); dots.forEach((d,i)=>setDot(d,colorA,i===pos?brightness/255:0.06)); }
+  else if (effect === 25) { popcornAccum+=speed; if(popcornAccum>=48){popcornAccum=0; if(Math.random()<0.7) popcornState[Math.floor(Math.random()*LED_COUNT)]=1;} dots.forEach((d,i)=>{popcornState[i]*=0.8; setDot(d,paletteColorAt(i/LED_COUNT),Math.max(0.05,(brightness/255)*popcornState[i]));}); }
+  else if (effect === 26) { // ripple
+    rippleAccum+=speed;
+    if(rippleOrigin<0){ rippleOrigin=Math.floor(Math.random()*LED_COUNT); ripplePos=0; }
+    dots.forEach(d=>{d.style.background='#1a1a18';d.style.boxShadow='inset 0 0 3px rgba(0,0,0,0.8)';});
+    const left=rippleOrigin-Math.floor(ripplePos), right=rippleOrigin+Math.floor(ripplePos);
+    const fade=Math.max(0,1-ripplePos/LED_COUNT);
+    if(left>=0&&left<LED_COUNT) setDot(dots[left],colorA,(brightness/255)*fade);
+    if(right>=0&&right<LED_COUNT) setDot(dots[right],colorA,(brightness/255)*fade);
+    if(rippleAccum>=48){rippleAccum=0; ripplePos+=1; if(ripplePos>LED_COUNT) rippleOrigin=-1;}
+  }
+  else if (effect === 27) { glitterAccum+=speed; dots.forEach((d,i)=>setDot(d, (glitterFlash===i)?'#ffffff':colorA, brightness/255)); if(glitterAccum>=64){glitterAccum=0; glitterFlash=Math.random()<0.5?Math.floor(Math.random()*LED_COUNT):-1;} }
+  else if (effect === 28) {
+    candleAccum+=speed;
+    if (candleAccum>=80) { candleAccum=0; candleState = candleState.map(()=>0.7+Math.random()*0.3); }
+    dots.forEach((d,i)=>setDot(d, colorA, (brightness/255)*candleState[i]));
+  }
+  else if (effect === 29) { // heartbeat
+    heartbeatAccum+=speed; if(heartbeatAccum>=40){heartbeatAccum=0; heartbeatPhase=(heartbeatPhase+3)%256;} const phase=heartbeatPhase%256;
+    let lvl=0;
+    if(phase<40) lvl=Math.sin(phase*6*Math.PI/180);
+    else if(phase<70) lvl=0;
+    else if(phase<100) lvl=Math.sin((phase-70)*8*Math.PI/180);
+    dots.forEach(d=>setDot(d,colorA,(brightness/255)*Math.max(0,lvl)));
+  }
+  else if (effect === 30) { // gradient flow - travels through the full custom palette
+    gradFlowAccum+=speed; if(gradFlowAccum>=10){gradFlowAccum=0; gradFlowPhase=(gradFlowPhase+4)%256;}
+    dots.forEach((d,i)=>{
+      const raw=(gradFlowPhase+i*(256/LED_COUNT))%256;
+      const tri=raw<128 ? raw*2 : (255-raw)*2; // triangle wave 0..255..0
+      setDot(d,paletteColorAt(tri/255),brightness/255);
+    });
+  }
+  else if (effect === 31) { // pixel colors - direct display of the per-LED grid, nothing to desync
+    dots.forEach((d,i)=>setDot(d, pixelColors[i] || '#000000', brightness/255));
+  }
+
+  glowThrottle++;
+  if (glowThrottle >= 8 && power) { // ~8 frames between updates - plenty smooth, avoids reflow every single frame
+    glowThrottle = 0;
+    const mid = dots[Math.floor(dots.length / 2)];
+    if (mid && mid.style.background) {
+      document.querySelector('.chassis-unit')?.style.setProperty('--glow-color', mid.style.background);
+    }
+  }
+
+  requestAnimationFrame(tick);
+}
+let glowThrottle = 0;
+function setDot(d, col, alpha) {
+  d.style.background = col;
+  d.style.boxShadow = `0 0 ${6*alpha+2}px ${col}, inset 0 0 2px rgba(0,0,0,0.4)`;
+  d.style.opacity = Math.max(0.15, alpha);
+}
+requestAnimationFrame(tick);
+
+// Fonts loading late can shift button widths after our initial positioning ran,
+// so re-position once everything's actually settled.
+window.addEventListener('load', () => setTimeout(() => { activateTab(savedTab, false); positionAllIndicators(); }, 50));
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionAllIndicators);
+
+/* ---- iOS-style overlay scrollbar ----
+   Native scrollbar is hidden (see #iosScrollbar / ::-webkit-scrollbar rules above);
+   this floating pill mirrors it: thin, edge-hugging, appears on scroll/touch,
+   fades out ~1s after motion stops, thickens slightly while being dragged. */
+(function() {
+  const bar = document.getElementById('iosScrollbar');
+  const MIN_THUMB = 32;   // px, floor so short scrollbars stay grabbable
+  const EDGE_PAD = 4;     // px top/bottom inset from viewport edge
+  let hideTimer = null;
+  let dragging = false, dragStartY = 0, dragStartScroll = 0;
+
+  function trackHeight() { return window.innerHeight - EDGE_PAD * 2; }
+
+  function layout() {
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const track = trackHeight();
+    const thumbH = Math.max(MIN_THUMB, (window.innerHeight / document.documentElement.scrollHeight) * track);
+    const maxTravel = track - thumbH;
+    const progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
+    bar.style.height = thumbH + 'px';
+    bar.style.transform = `translateY(${EDGE_PAD + progress * maxTravel}px)`;
+    return scrollable > 0;
+  }
+
+  function show() {
+    if (!layout()) { bar.classList.remove('visible'); return; } // nothing to scroll, stay hidden
+    bar.classList.add('visible');
+    if (hideTimer) clearTimeout(hideTimer);
+    if (!dragging) hideTimer = setTimeout(() => bar.classList.remove('visible'), 1000);
+  }
+
+  window.addEventListener('scroll', show, { passive: true });
+  window.addEventListener('resize', () => { if (bar.classList.contains('visible')) layout(); });
+
+  // Let the thumb itself be grabbed and dragged, like iOS/macOS overlay bars.
+  bar.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    bar.classList.add('dragging');
+    bar.setPointerCapture(e.pointerId);
+    dragStartY = e.clientY;
+    dragStartScroll = window.scrollY;
+    if (hideTimer) clearTimeout(hideTimer);
+    e.preventDefault();
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const track = trackHeight();
+    const thumbH = Math.max(MIN_THUMB, (window.innerHeight / document.documentElement.scrollHeight) * track);
+    const maxTravel = track - thumbH;
+    const deltaPx = e.clientY - dragStartY;
+    const deltaScroll = maxTravel > 0 ? (deltaPx / maxTravel) * scrollable : 0;
+    window.scrollTo(0, dragStartScroll + deltaScroll);
+    layout();
+  });
+  function endDrag() {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove('dragging');
+    hideTimer = setTimeout(() => bar.classList.remove('visible'), 1000);
+  }
+  bar.addEventListener('pointerup', endDrag);
+  bar.addEventListener('pointercancel', endDrag);
+
+  window.addEventListener('load', layout);
+})();
+
+/* ---- Terminal tab ----
+   A real PTY-backed shell over a WebSocket to /api/terminal, rendered with
+   xterm.js. Connects lazily (only once the tab is actually opened) and
+   stays connected in the background across tab switches - only actually
+   torn down on page close (beforeunload) or an explicit Restart. */
+const termSubtitle     = document.getElementById('termSubtitle');
+const termStatusPill   = document.getElementById('termStatusPill');
+const termReconnectBtn = document.getElementById('termReconnectBtn');
+const termRestartBtn   = document.getElementById('termRestartBtn');
+const termContainer    = document.getElementById('termContainer');
+
+let termInstance = null, termFitAddon = null, termSocket = null;
+let termUserClosed = false; // distinguishes "left the tab" from "connection dropped unexpectedly"
+
+function ensureTermInstance() {
+  if (termInstance) return;
+  termInstance = new Terminal({
+    fontFamily: "'JetBrains Mono', monospace",
+    fontSize: 13,
+    cursorBlink: true,
+    scrollback: 5000,
+    theme: {
+      background: '#0a0a0a',
+      foreground: '#f5f5f7',
+      cursor: '#5ec8ff',
+      selectionBackground: 'rgba(94,200,255,0.3)',
+    },
+  });
+  termFitAddon = new FitAddon.FitAddon();
+  termInstance.loadAddon(termFitAddon);
+  termInstance.open(termContainer);
+  termFitAddon.fit();
+  window.addEventListener('resize', () => { if (termInstance && !document.getElementById('page-terminal').hidden) termFitAddon.fit(); });
+
+  // Attached exactly once for the terminal's whole lifetime, NOT per
+  // connection - these previously lived in connectTerminal() and got
+  // re-attached on every reconnect/restart without disposing the old ones,
+  // so after a few reconnects every keystroke fired N times (all writing to
+  // whatever the current socket was) - that's what was multiplying letters.
+  termInstance.onData((data) => {
+    if (termSocket && termSocket.readyState === WebSocket.OPEN) termSocket.send(data);
+  });
+  termInstance.onResize(() => sendTermResize());
+
+  // Manually intercept wheel events over the terminal and apply the scroll
+  // to its own viewport directly, rather than relying on CSS
+  // overscroll-behavior alone (inconsistent enough across browsers/versions
+  // that it wasn't reliably stopping the page from scrolling underneath).
+  termContainer.addEventListener('wheel', (e) => {
+    const viewport = termContainer.querySelector('.xterm-viewport');
+    if (!viewport) return;
+    e.preventDefault();
+    viewport.scrollTop += e.deltaY;
+  }, { passive: false });
+}
+
+function connectTerminal() {
+  ensureTermInstance();
+  // Always refit once visible again - the window may have been resized
+  // while this tab was hidden (a `hidden` page div can't be measured
+  // correctly), and rAF ensures we measure after the browser actually
+  // paints the now-unhidden layout.
+  requestAnimationFrame(() => { if (termFitAddon) { termFitAddon.fit(); sendTermResize(); } });
+  if (termSocket && (termSocket.readyState === WebSocket.OPEN || termSocket.readyState === WebSocket.CONNECTING)) return;
+  termUserClosed = false;
+  termStatusPill.textContent = 'Connecting…';
+  termStatusPill.className = 'status-pill warn';
+  termSubtitle.textContent = 'connecting…';
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  termSocket = new WebSocket(`${proto}//${location.host}/api/terminal`);
+  termSocket.binaryType = 'arraybuffer';
+
+  termSocket.addEventListener('open', () => {
+    termStatusPill.textContent = 'Connected';
+    termStatusPill.className = 'status-pill live';
+    termSubtitle.textContent = 'session stays alive in the background while you use other tabs';
+    termFitAddon.fit();
+    sendTermResize();
+  });
+  termSocket.addEventListener('message', (ev) => {
+    if (ev.data instanceof ArrayBuffer) {
+      termInstance.write(new Uint8Array(ev.data));
+    } else {
+      termInstance.write(ev.data);
+    }
+  });
+  termSocket.addEventListener('close', () => {
+    termStatusPill.textContent = 'Disconnected';
+    termStatusPill.className = 'status-pill off';
+    termSubtitle.textContent = termUserClosed ? 'not connected' : 'connection lost - click Reconnect';
+  });
+  termSocket.addEventListener('error', () => {
+    termStatusPill.textContent = 'Error';
+    termStatusPill.className = 'status-pill bad';
+  });
+}
+
+function sendTermResize() {
+  if (!termSocket || termSocket.readyState !== WebSocket.OPEN || !termInstance) return;
+  termSocket.send(JSON.stringify({ type: 'resize', cols: termInstance.cols, rows: termInstance.rows }));
+}
+
+function disconnectTerminal() {
+  termUserClosed = true;
+  if (termSocket) { termSocket.close(); termSocket = null; }
+}
+// Only actually tear down the shell when the browser tab/page itself closes
+// or reloads - switching between the panel's internal tabs deliberately
+// leaves the session running (see activateTab above), same as a real
+// terminal app would.
+window.addEventListener('beforeunload', disconnectTerminal);
+
+termReconnectBtn.addEventListener('click', connectTerminal);
+
+// Restart: kill the current shell outright and start a genuinely fresh one
+// (not just reconnect a dropped socket) - clears the on-screen buffer too,
+// since restarting into a screen full of old scrollback isn't really "fresh".
+termRestartBtn.addEventListener('click', () => {
+  const startFresh = () => { if (termInstance) termInstance.clear(); connectTerminal(); };
+  if (termSocket) {
+    // Wait for the actual close event rather than guessing with a fixed
+    // delay - the server's cleanup (killing the old shell) runs as part of
+    // that same close, so this guarantees the new session doesn't start
+    // until the old one is genuinely gone instead of racing it.
+    termSocket.addEventListener('close', startFresh, { once: true });
+    disconnectTerminal();
+  } else {
+    startFresh();
+  }
+});
+</script>
+</body>
+</html>
