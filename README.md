@@ -51,6 +51,7 @@ To remove it later:
 - Standard Linux hwmon sensors (`k10temp`, `amdgpu`, `nct6686`, `nvme`) via generic sysfs — not distro-specific. Built/tested on CachyOS
 
 ### ESP32 wiring
+> **Note:** I used a PWM Dupont splitter to tap the 12V rail, then a 12V-to-5V buck converter, so the fans and ESP32 sync with the motherboard's S5 (soft-off) state instead of staying on. You can also power the ARGB fans straight off the PSU, but then they won't respect S5 — the ARGB/ESP32 will always be on. A 4-pin RGB connector works too, as long as you know the 3-pin ARGB wiring.
 
 <p align="center">
   <img src="images/ARGB Fans ESP32 Wiring Diagram.png" alt="ESP32 to ARGB fans wiring diagram" width="600">
