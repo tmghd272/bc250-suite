@@ -228,6 +228,22 @@ func readNCT6686(readings *[]Reading) {
 
 var pwmEnableRe = regexp.MustCompile(`^pwm(\d+)_enable$`)
 
+// fanManualPct remembers each channel's last explicitly-set manual percent.
+// Needed because Curve mode writes straight to the raw pwmN duty register
+// every poll tick (that's how it's meant to work), which silently clobbers
+// whatever percent Manual mode last left there. Flipping back to Manual only
+// sends {enabled:true} with no percent (see the /api/fan handler), so
+// without this, writeFan would leave the register exactly as the curve last
+// set it - looking like the saved manual setting got reset. Auto mode never
+// touches the raw register at all, which is why this never showed up going
+// Manual -> Auto -> Manual, only Manual -> Curve -> Manual.
+// In-memory only (not persisted to disk) - this only needs to survive
+// within a running session, same lifetime as fanCurveLastPct.
+var (
+	fanManualPctMu sync.Mutex
+	fanManualPct   = map[int]float64{} // channel -> last percent explicitly set via manual mode
+)
+
 type FanChannel struct {
 	Index   int     `json:"index"`   // matches the pwm{N} filename
 	Enable  int     `json:"enable"`  // raw pwmN_enable value, -1 if unreadable
@@ -369,6 +385,9 @@ func resetAllFansToStock() error {
 	fanCurveLiveMu.Lock()
 	fanCurveLive = map[int]curveLivePoint{}
 	fanCurveLiveMu.Unlock()
+	fanManualPctMu.Lock()
+	fanManualPct = map[int]float64{}
+	fanManualPctMu.Unlock()
 
 	entries, _ := os.ReadDir(hwmon)
 	var firstErr error
@@ -1297,10 +1316,27 @@ func main() {
 			return
 		}
 		disableCurveForChannel(body.Index) // manual/auto override always wins over a stored curve
-		if err := writeFan(body.Index, body.Enabled, body.Percent); err != nil {
+		percent := body.Percent
+		if percent == nil && body.Enabled != nil && *body.Enabled {
+			// Flipping to Manual with no explicit percent (tabbing
+			// Auto/Curve -> Manual) - re-apply this channel's last
+			// manually-set percent instead of leaving whatever a curve most
+			// recently wrote to the raw register. See fanManualPct comment.
+			fanManualPctMu.Lock()
+			if v, ok := fanManualPct[body.Index]; ok {
+				percent = &v
+			}
+			fanManualPctMu.Unlock()
+		}
+		if err := writeFan(body.Index, body.Enabled, percent); err != nil {
 			w.WriteHeader(http.StatusConflict)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
+		}
+		if percent != nil {
+			fanManualPctMu.Lock()
+			fanManualPct[body.Index] = *percent
+			fanManualPctMu.Unlock()
 		}
 		json.NewEncoder(w).Encode(readFanStatus())
 	})
