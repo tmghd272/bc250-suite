@@ -167,6 +167,7 @@ func readNCT6686(readings *[]Reading) {
 		return
 	}
 	fans := map[string]float64{}
+	rpmByIndex := map[string]float64{} // pwmN index -> rpm, for filtering the pwm aggregate below to channels with a real, currently-spinning fan
 	matches, _ := filepath.Glob(filepath.Join(hwmon, "fan*_label"))
 	for _, labelFile := range matches {
 		label, ok := readStr(labelFile)
@@ -177,6 +178,8 @@ func readNCT6686(readings *[]Reading) {
 		if rpm, ok := readNum(inputFile); ok && rpm > 0 {
 			safe := strings.Trim(nonAlnum.ReplaceAllString(strings.ToLower(label), "_"), "_")
 			fans[safe] = rpm
+			idx := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(labelFile), "fan"), "_label")
+			rpmByIndex[idx] = rpm
 		}
 	}
 	if len(fans) == 1 {
@@ -191,24 +194,52 @@ func readNCT6686(readings *[]Reading) {
 		}
 		add(readings, "fan_avg", roundTo(sum/float64(len(fans)), 0), true)
 	}
-	// Every detected pwmN channel, not just pwm1 - unified into a single
-	// "fan_pwm" reading (their average) so the Sensors tab reflects whatever
-	// is actually driving the fans right now, however many channels that is.
+	// Every detected pwmN channel that has a matching real, currently-
+	// spinning fan (rpmByIndex, built above) - not just any pwmN file that
+	// exists. nct6687d exposes up to 8 PWM channels on this chip, but only
+	// the ones actually wired to a header on this board's PCB mean
+	// anything; the rest (e.g. pwm6/7/8 here) always read 0% and would
+	// otherwise drag the "at a glance" Fan Curve reading way down - 5 real
+	// fans all at 64% plus 3 phantom/unwired ones at 0%, averaged over all
+	// 8, lands around 40%, nowhere near what's actually spinning.
+	//
+	// The aggregate itself is a MEDIAN, not a mean - a straight average
+	// still gets pulled off whatever most fans are actually doing by a
+	// single channel running a different curve/speed (say one fan at 78%
+	// while the rest sit at 64% - mean lands at ~67%, median stays at the
+	// 64% every other fan agrees on).
 	pwmMatches, _ := filepath.Glob(filepath.Join(hwmon, "pwm[0-9]*"))
-	pwmSum, pwmCount := 0.0, 0
+	var pwmPercents []float64
 	for _, f := range pwmMatches {
 		base := filepath.Base(f)
 		if strings.Contains(base, "_") {
 			continue // skip pwmN_enable, pwmN_mode, etc. - only the bare pwmN value files
 		}
+		idx := strings.TrimPrefix(base, "pwm")
+		if _, spinning := rpmByIndex[idx]; !spinning {
+			continue // no matching real, currently-spinning fan at this index
+		}
 		if v, ok := readNum(f); ok {
-			pwmSum += v
-			pwmCount++
+			pwmPercents = append(pwmPercents, roundTo(v/255*100, 0))
 		}
 	}
-	if pwmCount > 0 {
-		add(readings, "fan_pwm", roundTo(pwmSum/float64(pwmCount)/255*100, 0), true)
+	if len(pwmPercents) > 0 {
+		add(readings, "fan_pwm", median(pwmPercents), true)
 	}
+}
+
+// median returns the median of vs without mutating it - used to aggregate
+// multiple PWM channels into one "at a glance" percent. More representative
+// of "what most of the fans are doing" than a mean, which a single outlier
+// channel can pull away from what the rest agree on.
+func median(vs []float64) float64 {
+	s := append([]float64(nil), vs...)
+	sort.Float64s(s)
+	n := len(s)
+	if n%2 == 1 {
+		return s[n/2]
+	}
+	return roundTo((s[n/2-1]+s[n/2])/2, 0)
 }
 
 // ---------------- fan control ----------------
